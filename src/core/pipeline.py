@@ -428,6 +428,11 @@ class StockAnalysisPipeline:
             saved_count = self.db.save_daily_data(df, code, source_name)
             logger.info(f"{stock_name}({code}) 数据保存成功（来源: {source_name}，新增 {saved_count} 条）")
 
+            latest_rows = self.db.get_latest_data(code, days=5)
+            logger.info(
+                f"[DB Debug] {code} latest rows: "
+                f"{[(r.date.isoformat(), r.close, r.pct_chg) for r in latest_rows]}"
+            )
             return True, None
 
         except Exception as e:
