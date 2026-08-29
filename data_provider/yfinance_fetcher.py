@@ -224,10 +224,14 @@ class YfinanceFetcher(BaseFetcher):
                     df = df.loc[:, mask].copy()
 
             if df.empty:
-                raise DataFetchError(f"Yahoo Finance 未查询到 {stock_code} 的数据")
+               raise DataFetchError(f"Yahoo Finance 未查询到 {stock_code} 的数据")
 
-            return df
+            logger.info(
+               f"[Yahoo Debug] {stock_code} raw dates: "
+               f"{list(df.index[-5:])}"
+               )
 
+               return df
         except Exception as e:
             if isinstance(e, DataFetchError):
                 raise
