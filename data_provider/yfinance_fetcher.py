@@ -231,7 +231,7 @@ class YfinanceFetcher(BaseFetcher):
                f"{list(df.index[-5:])}"
                )
 
-               return df
+         return df
         except Exception as e:
             if isinstance(e, DataFetchError):
                 raise
