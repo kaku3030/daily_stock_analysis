@@ -31,16 +31,34 @@ CANONICAL_DECISION_SCALE: tuple[DecisionScaleBand, ...] = (
 )
 
 
-CANONICAL_DECISION_SCALE_PROMPT_ZH = """## Canonical 评分与动作口径
+CANONICAL_DECISION_SCALE_PROMPT_ZH = """## Canonical 评分与研究分级口径
 
-- `sentiment_score`、`operation_advice`、三态 `decision_type` 与八态 `action` 必须按同一口径表达。
-- 80-100：强烈买入，`action=buy`，`decision_type=buy`。
-- 60-79：买入，`action=buy`，`decision_type=buy`。
-- 40-59：观望，`action=watch`，`decision_type=hold`。
-- 20-39：减仓，`action=reduce`，`decision_type=sell`。
-- 0-19：卖出，`action=sell`，`decision_type=sell`。
-- `decision_type` 只保留 `buy|hold|sell` 兼容统计；更细建议必须写入 `action`。
-- 若 score >= 60 但最终 `action` 是 `hold/watch`，或 score < 40 但最终 `action` 是 `hold/watch`，必须在 `guardrail_reason` 或 `dashboard.decision_stability.reason` 中说明降级原因。"""
+- `sentiment_score` 表示“股票综合研究质量评分”，用于衡量该标的是否值得进入重点研究池，不代表短线买入强度。
+- 80-100：A级，优先深入研究。
+- 65-79：B级，值得持续观察。
+- 50-64：C级，有一定亮点，但暂不优先。
+- 0-49：D级，暂不进入重点观察池。
+
+为兼容现有程序字段：
+- `operation_advice` 固定输出“观望”。
+- `decision_type` 固定输出 `hold`。
+- `action` 固定输出 `watch`。
+- 不允许根据 sentiment_score 自动映射为 buy/add/reduce/sell。
+- 即使 sentiment_score >= 80，也不得因此输出买入、加仓、建仓、止损、止盈或仓位建议。
+- `guardrail_reason` 可用于解释为何某只股票虽然研究评分较高，但仍仅作为研究候选，不产生交易动作。
+
+评分应主要依据：
+- 公司质量与护城河
+- 营收、利润、EPS、自由现金流增长质量
+- 最新财报与管理层指引
+- 行业景气度
+- 估值合理性
+- 相对大盘及行业强弱
+- 技术结构
+- 最新新闻与催化剂
+
+技术指标只能作为辅助项，不能因均线多头、MACD金叉、RSI等单一技术信号显著提高研究评分。
+"""
 
 
 def normalize_score(value: Any) -> Optional[int]:
