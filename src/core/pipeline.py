@@ -419,6 +419,11 @@ class StockAnalysisPipeline:
             if df is None or df.empty:
                 return False, "获取数据为空"
 
+            logger.info(
+                f"[Daily Debug] {code} normalized tail: "
+                f"{df[['date', 'close', 'pct_chg']].tail(5).to_dict(orient='records')}"
+            )
+
             # 保存到数据库
             saved_count = self.db.save_daily_data(df, code, source_name)
             logger.info(f"{stock_name}({code}) 数据保存成功（来源: {source_name}，新增 {saved_count} 条）")
