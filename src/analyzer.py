@@ -4602,16 +4602,22 @@ class GeminiAnalyzer:
 
         amplitude = None
         change_amount = None
+        change_pct = None
+
         if prev_close not in (None, 0) and high is not None and low is not None:
             try:
                 amplitude = (float(high) - float(low)) / float(prev_close) * 100
             except (TypeError, ValueError, ZeroDivisionError):
                 amplitude = None
+
         if prev_close is not None and close is not None:
             try:
                 change_amount = float(close) - float(prev_close)
-            except (TypeError, ValueError):
+                if float(prev_close) != 0:
+                    change_pct = change_amount / float(prev_close) * 100
+            except (TypeError, ValueError, ZeroDivisionError):
                 change_amount = None
+                change_pct = None
 
         snapshot = {
             "date": context.get('date', '未知'),
@@ -4620,7 +4626,7 @@ class GeminiAnalyzer:
             "high": self._format_price(high),
             "low": self._format_price(low),
             "prev_close": self._format_price(prev_close),
-            "pct_chg": self._format_percent(today.get('pct_chg')),
+            "pct_chg": self._format_percent(change_pct),
             "change_amount": self._format_price(change_amount),
             "amplitude": self._format_percent(amplitude),
             "volume": self._format_volume(today.get('volume')),
