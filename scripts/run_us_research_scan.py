@@ -11,6 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.repositories.candidate_pool_repo import CandidatePoolRepository
 from src.services.screening.config import Config
 from src.services.screening.pipeline import screen
 
@@ -50,6 +51,22 @@ def _markdown(payload: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _sync_candidate_pool(payload: dict) -> None:
+    """Persist current research picks without making the scan depend on storage."""
+
+    try:
+        stats = CandidatePoolRepository().sync_from_screen_result(payload)
+        logger.info(
+            "Candidate pool synced: inserted=%d updated=%d",
+            stats.inserted,
+            stats.updated,
+        )
+    except Exception:
+        # Research scan is deliberately fail-open.  A DB/storage problem must not
+        # suppress the JSON/Markdown outputs that operators already rely on.
+        logger.exception("Candidate pool sync failed; research report remains available")
+
+
 def main() -> int:
     if not _enabled("US_RESEARCH_SCAN_ENABLED"):
         logger.info("US research scan disabled")
@@ -75,6 +92,7 @@ def main() -> int:
         encoding="utf-8",
     )
     (output_dir / "us_research_candidates.md").write_text(_markdown(payload), encoding="utf-8")
+    _sync_candidate_pool(payload)
     logger.info("US research scan completed with %d candidates", len(payload.get("picks", [])))
     return 0
 
