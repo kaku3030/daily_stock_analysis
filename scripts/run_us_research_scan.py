@@ -21,7 +21,8 @@ from src.services.screening.financial_change_radar import build_financial_change
 from src.services.screening.industry_radar import build_industry_radar, industry_radar_markdown
 from src.services.screening.news_change_radar import build_news_change_radar, news_change_radar_markdown
 from src.services.screening.pipeline import screen
-from src.services.screening.research_priority import build_research_priority_events, research_priority_markdown
+from src.services.screening.research_priority import research_priority_markdown
+from src.services.screening.research_priority_news import build_research_priority_events_with_news
 from src.services.screening.research_priority_notifications import dispatch_research_priority_alerts
 from src.services.screening.research_priority_transition import build_research_priority_alerts, research_priority_alerts_markdown
 
@@ -89,17 +90,13 @@ def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
         run_id = str(payload.get("run_id") or "")
         repo = CandidatePoolRepository()
         stats = repo.sync_from_screen_result(payload)
-
         change_repo = CandidateFinancialChangeRepository(repo.db)
         change_count = change_repo.sync_run(market, run_id)
         latest_changes = {row.code: financial_change_to_dict(row) for row in change_repo.list_latest(market)}
-
         candidates = [candidate_to_dict(record) for record in repo.list_candidates(market=market, include_retired=True)]
         for candidate in candidates:
             candidate["financial_change"] = latest_changes.get(str(candidate.get("code") or ""), {})
 
-        # Capture point-in-time catalyst/risk evidence before priority fusion. CandidatePool
-        # intentionally stores only the latest values, while this table preserves run history.
         event_repo = CandidateEventSnapshotRepository(repo.db)
         event_snapshot_count = event_repo.sync_run(market, run_id, candidates)
         latest_event_map = event_repo.latest_map(market)
@@ -108,18 +105,16 @@ def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
             candidate["news_change"] = latest_event.get("change") if isinstance(latest_event, dict) else {}
 
         industry_radar = build_industry_radar(candidates)
-        priority_events = build_research_priority_events(candidates, industry_radar)
+        priority_events = build_research_priority_events_with_news(candidates, industry_radar)
         priority_repo = ResearchPriorityEventRepository(repo.db)
         previous_priority_events = priority_repo.latest_payload_map(market, exclude_run_id=run_id)
         priority_alerts = build_research_priority_alerts(priority_events, previous_priority_events)
         priority_event_count = priority_repo.sync_run(market, run_id, priority_events)
-
         alerts_enabled = _research_alert_dispatch_enabled()
         notification_results: list[dict] = []
         if alerts_enabled and priority_alerts and priority_event_count > 0:
             notification_results = dispatch_research_priority_alerts(priority_alerts, market=market, run_id=run_id, max_alerts=RESEARCH_ALERT_MAX_PER_RUN)
         _write_notification_diagnostics(output_dir, enabled=alerts_enabled, eligible_alerts=len(priority_alerts), attempts=notification_results)
-
         priority_map = {str(event.get("code") or ""): event for event in priority_events}
         alert_map = {str(alert.get("code") or ""): alert for alert in priority_alerts}
         for candidate in candidates:
@@ -137,7 +132,6 @@ def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
         _write_json_markdown(output_dir, "us_research_news_change_radar", news_radar, news_change_radar_markdown(news_radar))
         _write_json_markdown(output_dir, "us_research_priority_events", priority_events, research_priority_markdown(priority_events))
         _write_json_markdown(output_dir, "us_research_priority_alerts", priority_alerts, research_priority_alerts_markdown(priority_alerts))
-
         logger.info("Candidate pool synced: inserted=%d updated=%d aged=%d watching=%d retired=%d reactivated=%d financial_snapshots=%d financial_changes=%d event_snapshots=%d priority_events=%d priority_alerts=%d notification_attempts=%d", stats.inserted, stats.updated, stats.aged, stats.watching, stats.retired, stats.reactivated, stats.financial_snapshots, change_count, event_snapshot_count, priority_event_count, len(priority_alerts), len(notification_results))
     except Exception:
         logger.exception("Candidate pool sync failed; daily research report remains available")
