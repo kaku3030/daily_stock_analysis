@@ -1,6 +1,10 @@
 name: US Research Stateful Scan
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/01-us-research-stateful.yml"
   schedule:
     - cron: '20 10 * * 1-5'
   workflow_dispatch:
@@ -10,8 +14,66 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate-save:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create synthetic SQLite state
+        run: |
+          mkdir -p data
+          python - <<'PY'
+          import sqlite3
+          from pathlib import Path
+
+          db = Path('data/stock_analysis.db')
+          with sqlite3.connect(db) as connection:
+              connection.execute('CREATE TABLE research_state_probe (value TEXT NOT NULL)')
+              connection.execute("INSERT INTO research_state_probe(value) VALUES ('cache-roundtrip-ok')")
+              connection.commit()
+              result = connection.execute('PRAGMA quick_check').fetchone()[0]
+          if str(result).lower() != 'ok':
+              raise SystemExit(f'quick_check failed before cache save: {result}')
+          print('✅ Synthetic SQLite state created')
+          PY
+
+      - name: Save synthetic state cache
+        uses: actions/cache/save@v4
+        with:
+          path: data/stock_analysis.db
+          key: us-research-state-ci-${{ runner.os }}-${{ github.run_id }}
+
+  validate-restore:
+    if: github.event_name == 'push'
+    needs: validate-save
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restore synthetic state cache
+        uses: actions/cache/restore@v4
+        with:
+          path: data/stock_analysis.db
+          key: us-research-state-ci-${{ runner.os }}-${{ github.run_id }}
+
+      - name: Verify restored SQLite state
+        run: |
+          python - <<'PY'
+          import sqlite3
+          from pathlib import Path
+
+          db = Path('data/stock_analysis.db')
+          if not db.exists():
+              raise SystemExit('restored database is missing')
+          with sqlite3.connect(db) as connection:
+              result = connection.execute('PRAGMA quick_check').fetchone()[0]
+              value = connection.execute('SELECT value FROM research_state_probe').fetchone()[0]
+          if str(result).lower() != 'ok':
+              raise SystemExit(f'quick_check failed after cache restore: {result}')
+          if value != 'cache-roundtrip-ok':
+              raise SystemExit(f'unexpected restored value: {value!r}')
+          print('✅ GitHub Cache -> SQLite roundtrip verified')
+          PY
+
   scan:
-    if: github.event_name == 'workflow_dispatch' || vars.US_RESEARCH_STATEFUL_ENABLED == 'true'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && vars.US_RESEARCH_STATEFUL_ENABLED == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
