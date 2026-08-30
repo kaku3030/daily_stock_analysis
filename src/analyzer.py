@@ -2418,7 +2418,12 @@ class GeminiAnalyzer:
         market_role = get_market_role(stock_code, lang)
         market_guidelines = get_market_guidelines(stock_code, lang)
         skill_instructions, default_skill_policy, use_legacy_default_prompt = self._get_skill_prompt_sections()
-        if use_legacy_default_prompt:
+        research_output_mode = os.getenv("ANALYSIS_OUTPUT_MODE", "decision").strip().lower() in {
+            "research",
+            "selection",
+            "screening",
+        }
+        if use_legacy_default_prompt or research_output_mode:
             base_prompt = self.LEGACY_DEFAULT_SYSTEM_PROMPT.replace(
                 "{market_placeholder}", market_role
             ).replace(
@@ -2459,7 +2464,7 @@ class GeminiAnalyzer:
 - Use the common Korean or original listed company name when confident; do not invent one.
 - This includes `stock_name`, `trend_prediction`, `operation_advice`, `confidence_level`, nested dashboard text, checklist items, and all narrative summaries.
 """
-        return base_prompt + """
+        prompt = base_prompt + """
 
 ## 输出语言（最高优先级）
 
@@ -2467,6 +2472,18 @@ class GeminiAnalyzer:
 - `decision_type` 必须保持为 `buy|hold|sell`。
 - 所有面向用户的人类可读文本值必须使用中文。
 """
+        if research_output_mode:
+            prompt += """
+
+## 研究输出模式（最高优先级）
+
+- 本次评分表示“进一步研究优先级”，不表示买入强度。
+- `operation_advice=观望`、`decision_type=hold`、`action=watch`。
+- 不输出真实仓位、买入点、止损价、止盈价或收益承诺；兼容字段填写 `N/A（仅用于研究）`。
+- 技术面描述状态与证据，不允许单个指标直接产生交易结论。
+- 核心结论使用“优先研究/候选观察/等待确认/暂不研究/高风险排除”。
+"""
+        return prompt
 
     def _has_channel_config(self, config: Config) -> bool:
         """Check if multi-channel config (channels / YAML / legacy model_list) is active."""

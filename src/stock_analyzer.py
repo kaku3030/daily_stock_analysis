@@ -132,6 +132,9 @@ class TrendAnalysisResult:
     signal_score: int = 0            # 综合评分 0-100
     signal_reasons: List[str] = field(default_factory=list)
     risk_factors: List[str] = field(default_factory=list)
+    # Neutral, layered technical state.  Kept alongside legacy signal fields
+    # during migration so existing reports and integrations remain compatible.
+    research_state: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -166,6 +169,7 @@ class TrendAnalysisResult:
             'rsi_24': self.rsi_24,
             'rsi_status': self.rsi_status.value,
             'rsi_signal': self.rsi_signal,
+            'research_state': self.research_state,
         }
 
 
@@ -259,6 +263,16 @@ class StockTrendAnalyzer:
 
         # 7. 生成买入信号
         self._generate_signal(result)
+
+        # Add the new neutral research view without changing the legacy signal
+        # contract.  Lower timeframes are intentionally unknown until a caller
+        # supplies real 1h/15m bars.
+        try:
+            from src.technical import TechnicalAnalyzer
+
+            result.research_state = TechnicalAnalyzer().analyze(code, df).to_dict()
+        except Exception as exc:
+            logger.warning("%s 分层技术状态计算失败，保留旧分析结果: %s", code, exc)
 
         return result
     
