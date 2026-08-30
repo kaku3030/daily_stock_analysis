@@ -12,27 +12,22 @@ Keep this file concise and factual. Update it at the end of each meaningful rese
 
 ## Current phase
 
-**News / catalyst change radar — design approved, implementation not yet committed.**
+**News / catalyst change radar — implementation complete in this checkpoint; next phase is operational validation across multiple real stateful scans.**
 
-Goal: turn existing per-run news/catalyst/risk evidence into point-in-time history and deterministic change detection, then feed only material transitions into the existing research-priority / notification path.
+The radar stores point-in-time event evidence, deterministically suppresses repeated/paraphrased old events, identifies new catalysts and new risks, and feeds material changes into the existing research-priority / transition-gate path.
 
-Planned first-version event states:
-
-- `new_catalyst`
-- `new_risk`
-- `resolved_or_missing`
-- `unchanged`
-
-Key constraint: repeated or paraphrased old news must not repeatedly raise research priority or trigger alerts.
+Important invariant: missing evidence is not treated as confirmed risk resolution.
 
 ## Completed research-platform capabilities
 
-- Persistent US research candidate pool with lifecycle tracking (`active` / `watching` / `retired`).
+- Persistent US research candidate pool with `active` / `watching` / `retired` lifecycle tracking.
 - Industry radar combining candidate research strength with market-backed industry heat when available.
-- Earnings / valuation snapshot extraction and point-in-time financial history.
+- Earnings / valuation snapshots and point-in-time financial history.
 - Financial change detection across adjacent valid snapshots.
-- Research-priority events where priority means **re-research urgency**, not bullishness or a trade signal.
-- Priority transition gate / deduplication for material upgrades, tone flips, guidance changes, and recoveries.
+- Point-in-time news / catalyst / risk event snapshots with deterministic change detection.
+- News change radar states: `new_catalyst`, `new_risk`, `resolved_or_missing`, `unchanged`.
+- Research-priority events where priority means re-research urgency, not bullishness or a trade signal.
+- Priority transition gate / deduplication for material upgrades, tone flips, guidance changes, event changes, and recoveries.
 - Notification adapter reusing the existing `NotificationService`; no automated buy/sell instructions.
 - Dedicated stateful US research workflow with SQLite persistence through GitHub Actions cache.
 - SQLite `quick_check`, WAL checkpointing, cache save/restore, and cross-run state validation.
@@ -44,7 +39,9 @@ Key constraint: repeated or paraphrased old news must not repeatedly raise resea
 - Automated research must not emit explicit buy prices, stop-loss levels, take-profit levels, or actual position sizes.
 - Compatibility fields remain neutral (`operation_advice="观望"`, `decision_type="hold"`, `action="watch"`).
 - Research priority is urgency to investigate, not directional conviction.
-- Technical analysis remains a small part of the research score; tactical multi-timeframe analysis is a separate manual layer.
+- Technical analysis remains 5% of the automated research score; tactical multi-timeframe analysis is a separate manual layer.
+- Repeated or paraphrased old news must not repeatedly raise research priority or trigger alerts.
+- Absence of fresh evidence must not be interpreted as a confirmed risk resolution.
 
 Current research score framework:
 
@@ -61,63 +58,57 @@ Grades: A = 80–100, B = 65–79, C = 50–64, D < 50.
 
 ## Operational status
 
-Repository workflow state:
-
 - Stateful workflow: `.github/workflows/01-us-research-stateful.yml`
-- Legacy optional US research path should remain disabled when using the stateful workflow to avoid duplicate scans on independent ephemeral runners.
-- Stateful workflow persists only the research SQLite DB files (`stock_analysis.db`, WAL, SHM), not the whole `data/` directory.
-- GitHub Actions cache is operational persistence, not a permanent backup.
-
-User-verified configuration / runtime state as of 2026-08-30:
-
 - `US_RESEARCH_STATEFUL_ENABLED = true`
 - `US_RESEARCH_SCAN_ENABLED = false`
-- Telegram test message received successfully.
-- First manual real stateful `scan` completed successfully with checkpoint, validation, cache save, and report upload.
-- `US_RESEARCH_ALERTS_ENABLED` intentionally remains disabled until several real stateful scans establish a useful history baseline.
+- Telegram test message was received successfully.
+- The first manual real stateful scan completed successfully with checkpoint, SQLite validation, cache save, and report upload.
+- `US_RESEARCH_ALERTS_ENABLED` remains intentionally disabled until several real stateful scans establish a useful history baseline.
+- The legacy optional US research path should remain disabled while the stateful workflow is active to avoid duplicate independent scans.
+- GitHub Actions cache is operational persistence, not a permanent backup.
 
-## Last verified repository checkpoint
+## Current implementation checkpoint
 
-Latest known `main` commit before this status document:
+Base commit before the news / catalyst change implementation:
 
-- `d27c185f656603d721f6b44cfcabd1db8714169f` — `Document Telegram alert controls`
+- `501efec0f055ab374b01ea52fff414ba56cd3205` — `Add project status checkpoint`
 
-Related immediately preceding commit:
+This status file is updated in the same implementation commit as the news / catalyst change radar, so the authoritative current commit is the `main` head containing this file.
 
-- `338b50ac2073bd9ba0c34c7b9e97c6f4d6155c7b` — `Wire Telegram research alerts`
+## News / catalyst change radar
 
-## Next implementation
-
-### News / catalyst change radar
-
-Reuse existing evidence instead of creating a parallel news system:
+Evidence is reused from:
 
 - `Pick.dsa_news`
 - `Pick.llm_catalysts`
 - `Pick.llm_risks`
-- current candidate-pool `catalysts_json` / `risks_json`
+- compatibility catalyst/risk fields already present in candidate data
 
-Planned durable history should store point-in-time event evidence per `market + code + run_id`, including normalized fingerprints suitable for deterministic dedupe.
+Durable table:
 
-Expected outputs:
+- `research_candidate_event_snapshots`
+
+Outputs:
 
 - `us_research_news_change_radar.json`
 - `us_research_news_change_radar.md`
 
-Expected downstream path:
+Downstream path:
 
-`news/catalyst change -> research priority -> transition gate -> notification adapter -> Telegram (when alerts are enabled)`
+`news/catalyst evidence -> event snapshot -> change detection -> research priority -> transition gate -> notification adapter`
 
-Implementation rules:
+Deterministic normalization/fingerprinting is preferred over LLM judgement for deduplication. The comparison is deliberately conservative and is not a semantic truth engine.
 
-- Prefer deterministic normalization/fingerprinting before using LLM judgement for change detection.
-- Do not infer bullish/bearish trading instructions from event wording.
-- Fail open when upstream news evidence is missing; lack of fresh evidence must not be treated as a confirmed resolved risk without sufficient history/evidence.
-- Add focused non-network tests and update relevant docs / `docs/CHANGELOG.md` when the feature becomes user-visible.
+## Validation next
+
+- Let multiple real stateful scans accumulate so adjacent event comparisons can be observed on real candidates.
+- Inspect `new_catalyst` / `new_risk` frequency and false-positive rate before enabling automatic Telegram research alerts.
+- Confirm SQLite state/cache remains healthy after the new event table starts accumulating rows.
+- Tune deterministic similarity thresholds only from observed false positives/false negatives, not from isolated examples.
 
 ## Later roadmap
 
-After the news / catalyst change layer is stable:
+After news/catalyst validation:
 
 - Multi-timeframe technical state:
   - Daily: MA + SuperTrend + MACD + RSI + Volume
@@ -129,7 +120,9 @@ After the news / catalyst change layer is stable:
 
 ## Known risks / follow-ups
 
+- Deterministic text similarity can miss deep semantic paraphrases and can occasionally over-match short generic phrases.
+- `resolved_or_missing` is intentionally not a confirmed recovery signal.
 - GitHub Actions cache may be evicted after inactivity; it is not a permanent research-history backup.
-- The current scheduled stateful scan time should be reviewed against US market close / daylight-saving time before relying on it as an after-close daily research run.
+- The scheduled stateful scan time should be reviewed against US market close / daylight-saving time before relying on it as an after-close daily research run.
 - Cross-day financial/event change detection becomes materially useful only after enough successful real stateful scans have accumulated.
 - Work/chat history is not treated as the source of truth for completion; repository state, commits, tests, and Actions are authoritative.

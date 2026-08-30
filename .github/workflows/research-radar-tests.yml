@@ -6,12 +6,14 @@ on:
     paths:
       - "src/repositories/candidate_pool_repo.py"
       - "src/repositories/financial_change_repo.py"
+      - "src/repositories/research_event_repo.py"
       - "src/repositories/research_priority_repo.py"
       - "src/schemas/research_financials.py"
       - "src/services/screening/industry_radar.py"
       - "src/services/screening/earnings_valuation_radar.py"
       - "src/services/screening/financial_change.py"
       - "src/services/screening/financial_change_radar.py"
+      - "src/services/screening/news_change.py"
       - "src/services/screening/research_priority.py"
       - "src/services/screening/research_priority_transition.py"
       - "src/services/screening/research_priority_notifications.py"
@@ -23,6 +25,7 @@ on:
       - "tests/test_earnings_valuation_radar.py"
       - "tests/test_financial_change.py"
       - "tests/test_financial_change_repo.py"
+      - "tests/test_research_news_change.py"
       - "tests/test_research_priority.py"
       - "tests/test_research_priority_repo.py"
       - "tests/test_research_priority_transition.py"
@@ -60,6 +63,7 @@ jobs:
             tests/test_earnings_valuation_radar.py \
             tests/test_financial_change.py \
             tests/test_financial_change_repo.py \
+            tests/test_research_news_change.py \
             tests/test_research_priority.py \
             tests/test_research_priority_repo.py \
             tests/test_research_priority_transition.py \

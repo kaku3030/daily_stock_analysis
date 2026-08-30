@@ -7,6 +7,7 @@ from typing import Any
 
 GRADE_BONUS = {"A": 20.0, "B": 14.0, "C": 6.0, "D": 0.0}
 FINANCIAL_ATTENTION_BONUS = {"high": 20.0, "medium": 12.0, "low": 5.0, "none": 0.0}
+NEWS_ATTENTION_BONUS = {"high": 18.0, "medium": 10.0, "low": 2.0, "none": 0.0}
 
 
 def build_research_priority_events(
@@ -31,9 +32,14 @@ def build_research_priority_events(
         financial = candidate.get("financial_change")
         if not isinstance(financial, dict):
             financial = {}
+        news_change = candidate.get("news_change")
+        if not isinstance(news_change, dict):
+            news_change = {}
         industry = industry_map.get(str(candidate.get("industry") or ""), {})
         catalysts = _text_list(candidate.get("catalysts"))
         risks = _text_list(candidate.get("risks"))
+        new_catalysts = _text_list(news_change.get("new_catalysts"))
+        new_risks = _text_list(news_change.get("new_risks"))
 
         score = research_score * 0.30
         score += GRADE_BONUS.get(grade, 0.0)
@@ -44,6 +50,8 @@ def build_research_priority_events(
 
         financial_attention = str(financial.get("attention") or "none")
         score += FINANCIAL_ATTENTION_BONUS.get(financial_attention, 0.0)
+        news_attention = str(news_change.get("attention") or "none")
+        score += NEWS_ATTENTION_BONUS.get(news_attention, 0.0)
         score += min(6.0, len(catalysts) * 2.0)
         # Risks increase research urgency; they are not treated as bullish points.
         score += min(4.0, len(risks) * 1.0)
@@ -52,6 +60,7 @@ def build_research_priority_events(
         event_type, tone = _event_type(
             grade=grade,
             financial=financial,
+            news_change=news_change,
             industry=industry,
             catalysts=catalysts,
         )
@@ -59,6 +68,7 @@ def build_research_priority_events(
             grade=grade,
             research_score=research_score,
             financial=financial,
+            news_change=news_change,
             industry=industry,
             catalysts=catalysts,
             risks=risks,
@@ -71,10 +81,12 @@ def build_research_priority_events(
                 industry_signal,
                 bool(catalysts),
                 bool(risks),
+                bool(news_change.get("material")),
             ]
         )
         notification_ready = bool(
-            financial_attention == "high"
+            new_risks
+            or financial_attention == "high"
             or (priority in {"urgent", "high"} and material_signal_count >= 2)
         )
 
@@ -95,6 +107,10 @@ def build_research_priority_events(
                 "earnings_trend": str(financial.get("earnings_trend") or "unknown"),
                 "valuation_trend": str(financial.get("valuation_trend") or "unknown"),
                 "guidance_changed": bool(financial.get("guidance_changed")),
+                "news_change_state": str(news_change.get("state") or "unchanged"),
+                "news_attention": news_attention,
+                "new_catalysts": new_catalysts[:5],
+                "new_risks": new_risks[:5],
                 "industry_strength_score": industry.get("combined_strength_score"),
                 "industry_market_score": industry.get("market_strength_score"),
                 "industry_data_mode": str(industry.get("market_data_mode") or "none"),
@@ -123,11 +139,11 @@ def research_priority_markdown(events: list[dict[str, Any]]) -> str:
         "",
         "> 优先级表示“多快需要重新研究”，不是看多/看空，也不是交易指令。",
         "",
-        "| 排名 | 股票 | 优先级 | 分数 | 类型 | 研究倾向 | 财务 | 行业 | 催化/风险 | 是否提醒 |",
-        "|---:|---|---|---:|---|---|---|---:|---|---|",
+        "| 排名 | 股票 | 优先级 | 分数 | 类型 | 研究倾向 | 财务 | 新闻变化 | 行业 | 催化/风险 | 是否提醒 |",
+        "|---:|---|---|---:|---|---|---|---|---:|---|---|",
     ]
     if not events:
-        lines.append("| - | 暂无事件 | - | - | - | - | - | - | - | - |")
+        lines.append("| - | 暂无事件 | - | - | - | - | - | - | - | - | - |")
         return "\n".join(lines) + "\n"
 
     for event in events:
@@ -136,12 +152,16 @@ def research_priority_markdown(events: list[dict[str, Any]]) -> str:
             signals.append(f"催化{len(event['catalysts'])}")
         if event.get("risks"):
             signals.append(f"风险{len(event['risks'])}")
+        if event.get("new_catalysts"):
+            signals.append(f"新催化{len(event['new_catalysts'])}")
+        if event.get("new_risks"):
+            signals.append(f"新风险{len(event['new_risks'])}")
         industry_score = event.get("industry_market_score")
         lines.append(
             f"| {event.get('priority_rank', '')} | {event.get('code', '')} {event.get('name', '')} | "
             f"{event.get('priority_level', '')} | {float(event.get('priority_score') or 0):.1f} | "
             f"{event.get('event_type', '')} | {event.get('research_tone', '')} | "
-            f"{event.get('financial_attention', 'none')} | "
+            f"{event.get('financial_attention', 'none')} | {event.get('news_change_state', 'unchanged')} | "
             f"{('-' if industry_score is None else f'{float(industry_score):.1f}')} | "
             f"{('/'.join(signals) if signals else '-')} | "
             f"{('是' if event.get('notification_ready') else '否')} |"
@@ -166,15 +186,21 @@ def _event_type(
     *,
     grade: str,
     financial: dict[str, Any],
+    news_change: dict[str, Any],
     industry: dict[str, Any],
     catalysts: list[str],
 ) -> tuple[str, str]:
     earnings = str(financial.get("earnings_trend") or "unknown")
+    news_state = str(news_change.get("state") or "unchanged")
     market_score = _number(industry.get("market_strength_score"))
     if earnings == "deteriorating":
         return "financial_risk", "risk_review"
     if bool(financial.get("guidance_changed")):
         return "guidance_change", "mixed"
+    if news_state == "new_risk" and _text_list(news_change.get("new_risks")):
+        return "news_risk", "risk_review"
+    if news_state == "new_catalyst" and _text_list(news_change.get("new_catalysts")):
+        return "new_catalyst", "positive_watch"
     if grade in {"A", "B"} and earnings == "improving" and market_score >= 70:
         return "positive_convergence", "positive_watch"
     if grade in {"A", "B"} and catalysts:
@@ -191,6 +217,7 @@ def _reasons(
     grade: str,
     research_score: float,
     financial: dict[str, Any],
+    news_change: dict[str, Any],
     industry: dict[str, Any],
     catalysts: list[str],
     risks: list[str],
@@ -204,6 +231,12 @@ def _reasons(
         )
     if financial.get("guidance_changed"):
         reasons.append("管理层指引文本发生变化")
+    new_catalysts = _text_list(news_change.get("new_catalysts"))
+    new_risks = _text_list(news_change.get("new_risks"))
+    if new_catalysts:
+        reasons.append(f"新增 {len(new_catalysts)} 条催化线索")
+    if new_risks:
+        reasons.append(f"新增 {len(new_risks)} 条风险线索")
     if industry.get("market_strength_score") is not None:
         reasons.append(f"行业市场强度 {_number(industry.get('market_strength_score')):.1f}")
     if catalysts:
