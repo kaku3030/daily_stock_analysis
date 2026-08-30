@@ -19,6 +19,7 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 _SP500_WIKI_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+_NASDAQ100_WIKI_URL = "https://en.wikipedia.org/wiki/Nasdaq-100"
 
 _DEFAULT_US_UNIVERSE = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "BRK-B",
@@ -35,13 +36,17 @@ def fetch_us_universe(source: str = "auto") -> list[str]:
 
     Sources:
         sp500   — scrape S&P 500 from Wikipedia
+        nasdaq100 — scrape NASDAQ-100 from Wikipedia
+        sp500_nasdaq100 — merge both universes and remove duplicates
         env     — read SCREENING_US_TICKERS (comma-separated)
         default — hardcoded top-50 US large-caps
         auto    — try sp500 → env → default
     """
-    src = source.lower()
+    src = source.lower().strip()
     if src == "auto":
-        for s in ("sp500", "env", "default"):
+        configured = os.getenv("SCREENING_US_UNIVERSE_SOURCE", "sp500_nasdaq100").strip().lower()
+        sources = [configured, "sp500", "env", "default"]
+        for s in dict.fromkeys(item for item in sources if item and item != "auto"):
             try:
                 tickers = fetch_us_universe(s)
                 if tickers:
@@ -53,6 +58,10 @@ def fetch_us_universe(source: str = "auto") -> list[str]:
 
     if src == "sp500":
         return _fetch_sp500_tickers()
+    elif src == "nasdaq100":
+        return _fetch_nasdaq100_tickers()
+    elif src in {"sp500_nasdaq100", "combined"}:
+        return sorted(set(_fetch_sp500_tickers()) | set(_fetch_nasdaq100_tickers()))
     elif src == "env":
         raw = os.getenv("SCREENING_US_TICKERS", "").strip()
         if not raw:
@@ -70,6 +79,25 @@ def _fetch_sp500_tickers() -> list[str]:
         if "Symbol" in tbl.columns:
             return sorted(tbl["Symbol"].dropna().str.strip().str.replace(".", "-", regex=False).tolist())
     raise RuntimeError("Could not find Symbol column in S&P 500 Wikipedia table")
+
+
+def _fetch_nasdaq100_tickers() -> list[str]:
+    tables = pd.read_html(_NASDAQ100_WIKI_URL)
+    for table in tables:
+        symbol_column = next(
+            (column for column in table.columns if str(column).strip().lower() in {"ticker", "symbol"}),
+            None,
+        )
+        if symbol_column is not None:
+            return sorted(
+                table[symbol_column]
+                .dropna()
+                .astype(str)
+                .str.strip()
+                .str.replace(".", "-", regex=False)
+                .tolist()
+            )
+    raise RuntimeError("Could not find ticker column in NASDAQ-100 Wikipedia table")
 
 
 def fetch_us_snapshot(
