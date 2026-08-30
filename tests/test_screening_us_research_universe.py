@@ -1,6 +1,7 @@
 import pandas as pd
 
 from src.services.screening import snapshot_us
+from src.services.screening.config import Config
 from src.services.screening.strategy import load_all_strategies
 
 
@@ -16,7 +17,7 @@ def test_nasdaq_parser_accepts_ticker_column(monkeypatch) -> None:
 
 
 def test_us_research_strategy_declares_us_scope() -> None:
-    strategies = load_all_strategies()
+    strategies = load_all_strategies(Config().strategies_dir)
     strategy = strategies["us_research_priority"]
     assert strategy.screening.market_scope == ["us"]
     assert strategy.screening.max_output == 10
