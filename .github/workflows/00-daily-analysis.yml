@@ -102,7 +102,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL || secrets.GEMINI_MODEL || 'gemini-3-flash-preview' }}
-          GEMINI_MODEL_FALLBACK: ${{ vars.GEMINI_MODEL_FALLBACK || secrets.GEMINI_MODEL_FALLBACK || 'gemini-2.5-flash' }}
+          GEMINI_MODEL_FALLBACK: ${{ vars.GEMINI_MODEL_FALLBACK || secrets.GEMINI_MODEL_FALLBACK || 'gemini-3.6-flash' }}
           GEMINI_REQUEST_DELAY: '3.0'
           
           # AIHubMix（优先于 OPENAI_API_KEY，自动适配 base_url，推荐国内用户）
@@ -409,10 +409,20 @@ jobs:
           REPORT_TYPE: ${{ vars.REPORT_TYPE || secrets.REPORT_TYPE || 'simple' }}
           REPORT_LANGUAGE: ${{ vars.REPORT_LANGUAGE || secrets.REPORT_LANGUAGE || '' }}
           REPORT_SHOW_LLM_MODEL: ${{ vars.REPORT_SHOW_LLM_MODEL || secrets.REPORT_SHOW_LLM_MODEL || 'true' }}
+          # research=研究优先级，不输出真实交易指令；decision 保留旧模式。
+          ANALYSIS_OUTPUT_MODE: ${{ vars.ANALYSIS_OUTPUT_MODE || 'research' }}
           SINGLE_STOCK_NOTIFY: ${{ vars.SINGLE_STOCK_NOTIFY || secrets.SINGLE_STOCK_NOTIFY || 'false' }}
           MARKET_REVIEW_ENABLED: ${{ vars.MARKET_REVIEW_ENABLED || secrets.MARKET_REVIEW_ENABLED || 'true' }}
           ANALYSIS_DELAY: ${{ vars.ANALYSIS_DELAY || secrets.ANALYSIS_DELAY || '0' }}
           TRADING_DAY_CHECK_ENABLED: ${{ vars.TRADING_DAY_CHECK_ENABLED || secrets.TRADING_DAY_CHECK_ENABLED || 'true' }}
+          # 美股自动研究候选（独立失败，不影响原自选股日报）
+          US_RESEARCH_SCAN_ENABLED: ${{ vars.US_RESEARCH_SCAN_ENABLED || 'false' }}
+          US_RESEARCH_STRATEGY: ${{ vars.US_RESEARCH_STRATEGY || 'us_research_priority' }}
+          US_RESEARCH_MAX_RESULTS: ${{ vars.US_RESEARCH_MAX_RESULTS || '10' }}
+          US_RESEARCH_DAILY_CANDIDATES: ${{ vars.US_RESEARCH_DAILY_CANDIDATES || '40' }}
+          US_RESEARCH_CONTEXT_CANDIDATES: ${{ vars.US_RESEARCH_CONTEXT_CANDIDATES || '20' }}
+          US_RESEARCH_LLM_ENABLED: ${{ vars.US_RESEARCH_LLM_ENABLED || 'true' }}
+          SCREENING_US_UNIVERSE_SOURCE: ${{ vars.SCREENING_US_UNIVERSE_SOURCE || 'sp500_nasdaq100' }}
           
           # ==========================================
           # 系统配置
@@ -532,6 +542,12 @@ jobs:
             python main.py --no-market-review $FORCE_RUN_ARG
           else
             python main.py $FORCE_RUN_ARG
+          fi
+
+          # 候选扫描为附加研究能力；数据源失败时保留原日报成功状态。
+          if [ "${US_RESEARCH_SCAN_ENABLED,,}" = "true" ]; then
+            echo "🔎 开始 NASDAQ 100 + S&P 500 研究候选扫描"
+            python scripts/run_us_research_scan.py || echo "⚠️ 美股候选扫描失败，原自选股分析不受影响"
           fi
       
       - name: 上传分析报告
