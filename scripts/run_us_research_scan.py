@@ -32,15 +32,15 @@ from src.services.screening.research_priority import (
     build_research_priority_events,
     research_priority_markdown,
 )
-from src.services.screening.research_priority_notifications import (
-    dispatch_research_priority_alerts,
-)
+from src.services.screening.research_priority_notifications import dispatch_research_priority_alerts
 from src.services.screening.research_priority_transition import (
     build_research_priority_alerts,
     research_priority_alerts_markdown,
 )
 
 logger = logging.getLogger(__name__)
+RESEARCH_ALERT_FLAG = "--send-research-alerts"
+RESEARCH_ALERT_MAX_PER_RUN = 5
 
 
 def _enabled(name: str, default: bool = False) -> bool:
@@ -50,12 +50,8 @@ def _enabled(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _positive_int(name: str, default: int, maximum: int) -> int:
-    try:
-        value = int(os.getenv(name, str(default)))
-    except (TypeError, ValueError):
-        value = default
-    return max(1, min(value, maximum))
+def _research_alert_dispatch_enabled() -> bool:
+    return RESEARCH_ALERT_FLAG in sys.argv[1:]
 
 
 def _markdown(payload: dict) -> str:
@@ -172,24 +168,18 @@ def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
         industry_radar = build_industry_radar(candidates)
         priority_events = build_research_priority_events(candidates, industry_radar)
         priority_repo = ResearchPriorityEventRepository(repo.db)
-        previous_priority_events = priority_repo.latest_payload_map(
-            market,
-            exclude_run_id=run_id,
-        )
-        priority_alerts = build_research_priority_alerts(
-            priority_events,
-            previous_priority_events,
-        )
+        previous_priority_events = priority_repo.latest_payload_map(market, exclude_run_id=run_id)
+        priority_alerts = build_research_priority_alerts(priority_events, previous_priority_events)
         priority_event_count = priority_repo.sync_run(market, run_id, priority_events)
 
-        alerts_enabled = _enabled("US_RESEARCH_ALERTS_ENABLED", False)
+        alerts_enabled = _research_alert_dispatch_enabled()
         notification_results: list[dict] = []
         if alerts_enabled and priority_alerts and priority_event_count > 0:
             notification_results = dispatch_research_priority_alerts(
                 priority_alerts,
                 market=market,
                 run_id=run_id,
-                max_alerts=_positive_int("US_RESEARCH_ALERTS_MAX_PER_RUN", 5, 20),
+                max_alerts=RESEARCH_ALERT_MAX_PER_RUN,
             )
         _write_notification_diagnostics(
             output_dir,
@@ -205,18 +195,8 @@ def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
             candidate["research_priority"] = priority_map.get(code, {})
             candidate["research_alert"] = alert_map.get(code, {})
 
-        _write_json_markdown(
-            output_dir,
-            "us_research_candidate_pool",
-            candidates,
-            _candidate_pool_markdown(candidates),
-        )
-        _write_json_markdown(
-            output_dir,
-            "us_research_industry_radar",
-            industry_radar,
-            industry_radar_markdown(industry_radar),
-        )
+        _write_json_markdown(output_dir, "us_research_candidate_pool", candidates, _candidate_pool_markdown(candidates))
+        _write_json_markdown(output_dir, "us_research_industry_radar", industry_radar, industry_radar_markdown(industry_radar))
 
         earnings_radar = build_earnings_valuation_radar(candidates)
         _write_json_markdown(
