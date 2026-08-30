@@ -11,7 +11,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.repositories.candidate_pool_repo import CandidatePoolRepository
+from src.repositories.candidate_pool_repo import (
+    CandidatePoolRepository,
+    candidate_to_dict,
+)
 from src.services.screening.config import Config
 from src.services.screening.pipeline import screen
 
@@ -39,7 +42,9 @@ def _markdown(payload: dict) -> str:
         "|---:|---|---:|---|---|---|",
     ]
     for pick in payload.get("picks", []):
-        reason = str(pick.get("ranking_reason") or pick.get("llm_thesis") or "待进一步研究").replace("|", "/")
+        reason = str(
+            pick.get("ranking_reason") or pick.get("llm_thesis") or "待进一步研究"
+        ).replace("|", "/")
         risk = str(pick.get("risk_summary") or "未识别重大风险").replace("|", "/")
         lines.append(
             f"| {pick.get('rank', '')} | {pick.get('code', '')} {pick.get('name', '')} | "
@@ -51,20 +56,80 @@ def _markdown(payload: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _sync_candidate_pool(payload: dict) -> None:
-    """Persist current research picks without making the scan depend on storage."""
+def _candidate_pool_markdown(candidates: list[dict]) -> str:
+    lines = [
+        "# 美股长期研究候选池",
+        "",
+        "> 等级反映最近一次研究评分；状态反映最近多次健康扫描中的持续入选情况。",
+        "> active=持续关注，watching=连续2次未入选，retired=连续5次未入选。重新入选会自动恢复 active。",
+        "",
+    ]
+
+    labels = {
+        "active": "持续关注",
+        "watching": "观察降温",
+        "retired": "暂时退出",
+    }
+    for status in ("active", "watching", "retired"):
+        rows = [row for row in candidates if row.get("status") == status]
+        if not rows:
+            continue
+        lines.extend(
+            [
+                f"## {labels[status]}",
+                "",
+                "| 等级 | 股票 | 研究分 | 行业 | 入选次数 | 连续未入选 | 最近入选 | 核心理由 | 主要风险 |",
+                "|---|---|---:|---|---:|---:|---|---|---|",
+            ]
+        )
+        for row in rows:
+            reason = str(row.get("ranking_reason") or "待进一步研究").replace("|", "/")
+            risk = str(row.get("risk_summary") or "未识别重大风险").replace("|", "/")
+            last_selected = str(row.get("last_selected_at") or "")[:10]
+            lines.append(
+                f"| {row.get('grade', '')} | {row.get('code', '')} {row.get('name', '')} | "
+                f"{float(row.get('score') or 0):.1f} | {row.get('industry', '')} | "
+                f"{int(row.get('selected_count') or 0)} | {int(row.get('missed_runs') or 0)} | "
+                f"{last_selected} | {reason} | {risk} |"
+            )
+        lines.append("")
+
+    if len(lines) == 5:
+        lines.append("当前候选池为空。")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
+    """Persist current picks and emit a long-lived candidate-pool snapshot."""
 
     try:
-        stats = CandidatePoolRepository().sync_from_screen_result(payload)
+        repo = CandidatePoolRepository()
+        stats = repo.sync_from_screen_result(payload)
+        candidates = [
+            candidate_to_dict(record)
+            for record in repo.list_candidates(market="us", include_retired=True)
+        ]
+        (output_dir / "us_research_candidate_pool.json").write_text(
+            json.dumps(candidates, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+        (output_dir / "us_research_candidate_pool.md").write_text(
+            _candidate_pool_markdown(candidates),
+            encoding="utf-8",
+        )
         logger.info(
-            "Candidate pool synced: inserted=%d updated=%d",
+            "Candidate pool synced: inserted=%d updated=%d aged=%d watching=%d retired=%d reactivated=%d",
             stats.inserted,
             stats.updated,
+            stats.aged,
+            stats.watching,
+            stats.retired,
+            stats.reactivated,
         )
     except Exception:
-        # Research scan is deliberately fail-open.  A DB/storage problem must not
-        # suppress the JSON/Markdown outputs that operators already rely on.
-        logger.exception("Candidate pool sync failed; research report remains available")
+        # Research scan is deliberately fail-open. A DB/storage/report problem must
+        # not suppress the daily JSON/Markdown outputs operators already rely on.
+        logger.exception("Candidate pool sync failed; daily research report remains available")
 
 
 def main() -> int:
@@ -92,7 +157,7 @@ def main() -> int:
         encoding="utf-8",
     )
     (output_dir / "us_research_candidates.md").write_text(_markdown(payload), encoding="utf-8")
-    _sync_candidate_pool(payload)
+    _sync_candidate_pool(payload, output_dir)
     logger.info("US research scan completed with %d candidates", len(payload.get("picks", [])))
     return 0
 
