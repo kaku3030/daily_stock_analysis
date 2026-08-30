@@ -7,6 +7,7 @@ from typing import Any
 
 GRADE_BONUS = {"A": 20.0, "B": 14.0, "C": 6.0, "D": 0.0}
 FINANCIAL_ATTENTION_BONUS = {"high": 20.0, "medium": 12.0, "low": 5.0, "none": 0.0}
+NEWS_ATTENTION_BONUS = {"high": 12.0, "medium": 7.0, "low": 3.0, "none": 0.0}
 
 
 def build_research_priority_events(
@@ -34,6 +35,9 @@ def build_research_priority_events(
         industry = industry_map.get(str(candidate.get("industry") or ""), {})
         catalysts = _text_list(candidate.get("catalysts"))
         risks = _text_list(candidate.get("risks"))
+        news_change = candidate.get("news_change")
+        if not isinstance(news_change, dict):
+            news_change = {}
 
         score = research_score * 0.30
         score += GRADE_BONUS.get(grade, 0.0)
@@ -44,6 +48,8 @@ def build_research_priority_events(
 
         financial_attention = str(financial.get("attention") or "none")
         score += FINANCIAL_ATTENTION_BONUS.get(financial_attention, 0.0)
+        news_attention = str(news_change.get("attention") or "none")
+        score += NEWS_ATTENTION_BONUS.get(news_attention, 0.0)
         score += min(6.0, len(catalysts) * 2.0)
         # Risks increase research urgency; they are not treated as bullish points.
         score += min(4.0, len(risks) * 1.0)
@@ -62,6 +68,7 @@ def build_research_priority_events(
             industry=industry,
             catalysts=catalysts,
             risks=risks,
+            news_change=news_change,
         )
         priority = _priority_level(score)
         material_signal_count = sum(
@@ -71,6 +78,7 @@ def build_research_priority_events(
                 industry_signal,
                 bool(catalysts),
                 bool(risks),
+                news_attention in {"high", "medium"},
             ]
         )
         notification_ready = bool(
@@ -95,6 +103,10 @@ def build_research_priority_events(
                 "earnings_trend": str(financial.get("earnings_trend") or "unknown"),
                 "valuation_trend": str(financial.get("valuation_trend") or "unknown"),
                 "guidance_changed": bool(financial.get("guidance_changed")),
+                "news_change_attention": news_attention,
+                "news_change_state": str(news_change.get("state") or "unchanged"),
+                "new_catalysts": news_change.get("new_catalysts") or [],
+                "new_risks": news_change.get("new_risks") or [],
                 "industry_strength_score": industry.get("combined_strength_score"),
                 "industry_market_score": industry.get("market_strength_score"),
                 "industry_data_mode": str(industry.get("market_data_mode") or "none"),
@@ -194,6 +206,7 @@ def _reasons(
     industry: dict[str, Any],
     catalysts: list[str],
     risks: list[str],
+    news_change: dict[str, Any],
 ) -> list[str]:
     reasons = [f"候选等级 {grade} / 研究分 {research_score:.1f}"]
     attention = str(financial.get("attention") or "none")
@@ -210,6 +223,12 @@ def _reasons(
         reasons.append(f"存在 {len(catalysts)} 条催化线索")
     if risks:
         reasons.append(f"存在 {len(risks)} 条风险线索")
+    new_catalysts = news_change.get("new_catalysts") or []
+    new_risks = news_change.get("new_risks") or []
+    if new_catalysts:
+        reasons.append(f"本轮新增 {len(new_catalysts)} 条催化线索，需复核证据")
+    if new_risks:
+        reasons.append(f"本轮新增 {len(new_risks)} 条风险线索，需优先复核")
     return reasons
 
 
@@ -234,3 +253,4 @@ def _number(value: Any) -> float:
         return float(value or 0.0)
     except (TypeError, ValueError):
         return 0.0
+

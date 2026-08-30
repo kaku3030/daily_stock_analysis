@@ -104,3 +104,37 @@ def test_candidate_only_industry_does_not_double_count_as_market_strength() -> N
     assert event["industry_market_score"] is None
     assert event["event_type"] == "priority_refresh"
     assert event["notification_ready"] is False
+
+
+def test_only_new_event_evidence_adds_bounded_research_urgency() -> None:
+    base = {
+        "code": "NVDA",
+        "grade": "B",
+        "score": 70,
+        "status": "active",
+        "industry": "Semiconductors",
+        "catalysts": ["AI demand"],
+        "risks": [],
+        "financial_change": {},
+    }
+    unchanged = build_research_priority_events(
+        [{**base, "news_change": {"state": "unchanged", "attention": "none"}}],
+        [],
+    )[0]
+    changed = build_research_priority_events(
+        [{
+            **base,
+            "news_change": {
+                "state": "changed",
+                "attention": "high",
+                "new_catalysts": [],
+                "new_risks": [{"text": "DOJ investigation", "severity": "high"}],
+            },
+        }],
+        [],
+    )[0]
+
+    assert changed["priority_score"] - unchanged["priority_score"] == 12.0
+    assert changed["news_change_attention"] == "high"
+    assert any("新增 1 条风险线索" in reason for reason in changed["reasons"])
+

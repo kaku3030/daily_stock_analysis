@@ -5,10 +5,13 @@ on:
     branches: [main]
     paths:
       - "src/repositories/candidate_pool_repo.py"
+      - "src/repositories/candidate_event_repo.py"
       - "src/repositories/financial_change_repo.py"
       - "src/repositories/research_priority_repo.py"
       - "src/schemas/research_financials.py"
       - "src/services/screening/industry_radar.py"
+      - "src/services/screening/news_change.py"
+      - "src/services/screening/news_change_radar.py"
       - "src/services/screening/earnings_valuation_radar.py"
       - "src/services/screening/financial_change.py"
       - "src/services/screening/financial_change_radar.py"
@@ -19,6 +22,8 @@ on:
       - "tests/test_candidate_pool_repo.py"
       - "tests/test_candidate_pool_industry_metrics.py"
       - "tests/test_candidate_pool_financials.py"
+      - "tests/test_candidate_event_repo.py"
+      - "tests/test_news_change.py"
       - "tests/test_industry_radar.py"
       - "tests/test_earnings_valuation_radar.py"
       - "tests/test_financial_change.py"
@@ -56,6 +61,8 @@ jobs:
             tests/test_candidate_pool_repo.py \
             tests/test_candidate_pool_industry_metrics.py \
             tests/test_candidate_pool_financials.py \
+            tests/test_candidate_event_repo.py \
+            tests/test_news_change.py \
             tests/test_industry_radar.py \
             tests/test_earnings_valuation_radar.py \
             tests/test_financial_change.py \
@@ -67,3 +74,4 @@ jobs:
 
       - name: Import smoke test for US research scan
         run: python -c "import scripts.run_us_research_scan; print('run_us_research_scan import ok')"
+

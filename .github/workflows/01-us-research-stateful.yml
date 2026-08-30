@@ -308,6 +308,7 @@ jobs:
                   tracked = (
                       'research_candidate_pool',
                       'research_candidate_financial_snapshots',
+                      'research_candidate_event_snapshots',
                       'research_candidate_financial_changes',
                       'research_priority_events',
                   )
@@ -346,3 +347,4 @@ jobs:
             logs/
           if-no-files-found: warn
           retention-days: 30
+

@@ -12,6 +12,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.repositories.candidate_pool_repo import CandidatePoolRepository, candidate_to_dict
+from src.repositories.candidate_event_repo import (
+    CandidateEventSnapshotRepository,
+    event_snapshot_to_dict,
+)
 from src.repositories.financial_change_repo import (
     CandidateFinancialChangeRepository,
     financial_change_to_dict,
@@ -27,6 +31,10 @@ from src.services.screening.financial_change_radar import (
     financial_change_radar_markdown,
 )
 from src.services.screening.industry_radar import build_industry_radar, industry_radar_markdown
+from src.services.screening.news_change_radar import (
+    build_news_change_radar,
+    news_change_radar_markdown,
+)
 from src.services.screening.pipeline import screen
 from src.services.screening.research_priority import (
     build_research_priority_events,
@@ -151,6 +159,12 @@ def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
         repo = CandidatePoolRepository()
         stats = repo.sync_from_screen_result(payload)
 
+        event_repo = CandidateEventSnapshotRepository(repo.db)
+        event_snapshot_count = event_repo.sync_run(payload)
+        latest_event_rows = [event_snapshot_to_dict(row) for row in event_repo.list_latest(market)]
+        news_change_radar = build_news_change_radar(latest_event_rows)
+        news_change_map = {str(row.get("code") or ""): row for row in news_change_radar}
+
         change_repo = CandidateFinancialChangeRepository(repo.db)
         change_count = change_repo.sync_run(market, run_id)
         latest_changes = {
@@ -164,6 +178,7 @@ def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
         ]
         for candidate in candidates:
             candidate["financial_change"] = latest_changes.get(str(candidate.get("code") or ""), {})
+            candidate["news_change"] = news_change_map.get(str(candidate.get("code") or ""), {})
 
         industry_radar = build_industry_radar(candidates)
         priority_events = build_research_priority_events(candidates, industry_radar)
@@ -197,6 +212,12 @@ def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
 
         _write_json_markdown(output_dir, "us_research_candidate_pool", candidates, _candidate_pool_markdown(candidates))
         _write_json_markdown(output_dir, "us_research_industry_radar", industry_radar, industry_radar_markdown(industry_radar))
+        _write_json_markdown(
+            output_dir,
+            "us_research_news_change_radar",
+            news_change_radar,
+            news_change_radar_markdown(news_change_radar),
+        )
 
         earnings_radar = build_earnings_valuation_radar(candidates)
         _write_json_markdown(
@@ -228,7 +249,7 @@ def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
 
         logger.info(
             "Candidate pool synced: inserted=%d updated=%d aged=%d watching=%d retired=%d "
-            "reactivated=%d financial_snapshots=%d financial_changes=%d priority_events=%d "
+            "reactivated=%d financial_snapshots=%d event_snapshots=%d financial_changes=%d priority_events=%d "
             "priority_alerts=%d notification_attempts=%d",
             stats.inserted,
             stats.updated,
@@ -237,6 +258,7 @@ def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
             stats.retired,
             stats.reactivated,
             stats.financial_snapshots,
+            event_snapshot_count,
             change_count,
             priority_event_count,
             len(priority_alerts),
@@ -279,3 +301,4 @@ def main() -> int:
 if __name__ == "__main__":
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
     raise SystemExit(main())
+
