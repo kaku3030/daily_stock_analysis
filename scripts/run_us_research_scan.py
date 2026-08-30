@@ -32,6 +32,9 @@ from src.services.screening.research_priority import (
     build_research_priority_events,
     research_priority_markdown,
 )
+from src.services.screening.research_priority_notifications import (
+    dispatch_research_priority_alerts,
+)
 from src.services.screening.research_priority_transition import (
     build_research_priority_alerts,
     research_priority_alerts_markdown,
@@ -45,6 +48,14 @@ def _enabled(name: str, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _positive_int(name: str, default: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return max(1, min(value, maximum))
 
 
 def _markdown(payload: dict) -> str:
@@ -117,6 +128,26 @@ def _write_json_markdown(output_dir: Path, stem: str, payload: object, markdown:
     (output_dir / f"{stem}.md").write_text(markdown, encoding="utf-8")
 
 
+def _write_notification_diagnostics(
+    output_dir: Path,
+    *,
+    enabled: bool,
+    eligible_alerts: int,
+    attempts: list[dict],
+) -> None:
+    payload = {
+        "enabled": enabled,
+        "eligible_alerts": eligible_alerts,
+        "attempted": len(attempts),
+        "successful": sum(bool(item.get("success")) for item in attempts),
+        "attempts": attempts,
+    }
+    (output_dir / "us_research_priority_notifications.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+
+
 def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
     try:
         market = str(payload.get("market") or "us").strip().lower()
@@ -150,6 +181,22 @@ def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
             previous_priority_events,
         )
         priority_event_count = priority_repo.sync_run(market, run_id, priority_events)
+
+        alerts_enabled = _enabled("US_RESEARCH_ALERTS_ENABLED", False)
+        notification_results: list[dict] = []
+        if alerts_enabled and priority_alerts and priority_event_count > 0:
+            notification_results = dispatch_research_priority_alerts(
+                priority_alerts,
+                market=market,
+                run_id=run_id,
+                max_alerts=_positive_int("US_RESEARCH_ALERTS_MAX_PER_RUN", 5, 20),
+            )
+        _write_notification_diagnostics(
+            output_dir,
+            enabled=alerts_enabled,
+            eligible_alerts=len(priority_alerts),
+            attempts=notification_results,
+        )
 
         priority_map = {str(event.get("code") or ""): event for event in priority_events}
         alert_map = {str(alert.get("code") or ""): alert for alert in priority_alerts}
@@ -201,7 +248,8 @@ def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
 
         logger.info(
             "Candidate pool synced: inserted=%d updated=%d aged=%d watching=%d retired=%d "
-            "reactivated=%d financial_snapshots=%d financial_changes=%d priority_events=%d priority_alerts=%d",
+            "reactivated=%d financial_snapshots=%d financial_changes=%d priority_events=%d "
+            "priority_alerts=%d notification_attempts=%d",
             stats.inserted,
             stats.updated,
             stats.aged,
@@ -212,6 +260,7 @@ def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
             change_count,
             priority_event_count,
             len(priority_alerts),
+            len(notification_results),
         )
     except Exception:
         logger.exception("Candidate pool sync failed; daily research report remains available")
