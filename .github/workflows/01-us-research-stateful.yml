@@ -151,6 +151,7 @@ jobs:
             data/stock_analysis.db
             data/stock_analysis.db-wal
             data/stock_analysis.db-shm
+            data/us_universe.last_good.json
           key: us-research-state-v1-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             us-research-state-v1-${{ runner.os }}-
@@ -206,6 +207,11 @@ jobs:
           US_RESEARCH_CONTEXT_CANDIDATES: ${{ vars.US_RESEARCH_CONTEXT_CANDIDATES || '20' }}
           US_RESEARCH_LLM_ENABLED: ${{ vars.US_RESEARCH_LLM_ENABLED || 'true' }}
           SCREENING_US_UNIVERSE_SOURCE: ${{ vars.SCREENING_US_UNIVERSE_SOURCE || 'sp500_nasdaq100' }}
+          SCREENING_US_UNIVERSE_CACHE_PATH: ./data/us_universe.last_good.json
+          SCREENING_US_UNIVERSE_CACHE_MAX_AGE_HOURS: ${{ vars.SCREENING_US_UNIVERSE_CACHE_MAX_AGE_HOURS || '168' }}
+          US_RESEARCH_REQUIRED_UNIVERSE_SOURCE: ${{ vars.US_RESEARCH_REQUIRED_UNIVERSE_SOURCE || 'sp500_nasdaq100' }}
+          US_RESEARCH_MIN_UNIVERSE_SIZE: ${{ vars.US_RESEARCH_MIN_UNIVERSE_SIZE || '400' }}
+          US_RESEARCH_MIN_UNIVERSE_COVERAGE: ${{ vars.US_RESEARCH_MIN_UNIVERSE_COVERAGE || '0.80' }}
           INDUSTRY_PROVIDER: ${{ vars.INDUSTRY_PROVIDER || 'none' }}
           SCREENING_SOURCE_CALL_TIMEOUT_SEC: ${{ vars.SCREENING_SOURCE_CALL_TIMEOUT_SEC }}
           SCREENING_SNAPSHOT_CALL_TIMEOUT_SEC: ${{ vars.SCREENING_SNAPSHOT_CALL_TIMEOUT_SEC }}
@@ -334,6 +340,7 @@ jobs:
             data/stock_analysis.db
             data/stock_analysis.db-wal
             data/stock_analysis.db-shm
+            data/us_universe.last_good.json
           key: us-research-state-v1-${{ runner.os }}-${{ github.run_id }}
 
       - name: Upload research reports

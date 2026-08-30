@@ -176,6 +176,12 @@ def screen(
     snapshot_count = len(snapshot_df)
     snapshot_source = str(snapshot_df.attrs.get("snapshot_source", ""))
     source_errors = [str(item) for item in snapshot_df.attrs.get("source_errors", [])]
+    universe_metadata = _universe_metadata(snapshot_df)
+    if universe_metadata["universe_errors"]:
+        degradation.extend(
+            f"US universe fallback: {item}"
+            for item in universe_metadata["universe_errors"]
+        )
     degradation.extend(f"Snapshot source fallback: {item}" for item in source_errors)
     if bool(snapshot_df.attrs.get("fallback_used")):
         stale_age = snapshot_df.attrs.get("stale_age_hours")
@@ -213,6 +219,7 @@ def screen(
             degradation=[*degradation, "No candidates after hard filter"],
             snapshot_source=snapshot_source,
             source_errors=source_errors,
+            **universe_metadata,
             strategy_version=strat.version,
             strategy_category=strat.category,
             post_analyzers=analyzer_names,
@@ -312,6 +319,7 @@ def screen(
             degradation=[*degradation, "No candidates after daily hard filter"],
             snapshot_source=snapshot_source,
             source_errors=source_errors,
+            **universe_metadata,
             post_analyzers=analyzer_names,
             daily_enriched=daily_enriched,
             daily_enrich_count=daily_enrich_count,
@@ -545,6 +553,7 @@ def screen(
         degradation=degradation,
         snapshot_source=snapshot_source,
         source_errors=source_errors,
+        **universe_metadata,
         deep_analysis_requested=("dsa" in analyzer_names),
         post_analyzers=analyzer_names,
         daily_enriched=daily_enriched,
@@ -678,6 +687,23 @@ def _required_snapshot_columns(filters) -> list[str]:
     if filters.change_pct_min is not None or filters.change_pct_max is not None:
         columns.append("change_pct")
     return list(dict.fromkeys(columns))
+
+
+def _universe_metadata(snapshot_df: pd.DataFrame) -> dict[str, object]:
+    coverage = snapshot_df.attrs.get("universe_coverage_ratio")
+    try:
+        normalized_coverage = float(coverage) if coverage is not None else None
+    except (TypeError, ValueError):
+        normalized_coverage = None
+    return {
+        "universe_requested_source": str(snapshot_df.attrs.get("universe_requested_source", "")),
+        "universe_source": str(snapshot_df.attrs.get("universe_source", "")),
+        "universe_count": int(snapshot_df.attrs.get("universe_count", 0) or 0),
+        "universe_snapshot_count": int(snapshot_df.attrs.get("universe_snapshot_count", 0) or 0),
+        "universe_coverage_ratio": normalized_coverage,
+        "universe_fallback_used": bool(snapshot_df.attrs.get("universe_fallback_used", False)),
+        "universe_errors": [str(item) for item in snapshot_df.attrs.get("universe_errors", [])],
+    }
 
 
 def _event_source_weights(event_profile: dict[str, object]) -> dict[str, float] | None:

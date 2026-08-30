@@ -4,13 +4,18 @@
 
 ## What is persisted
 
-The workflow persists only the SQLite research database and its WAL sidecars:
+The workflow persists the SQLite research database, its WAL sidecars, and the
+last known complete US index universe:
 
 - `data/stock_analysis.db`
 - `data/stock_analysis.db-wal`
 - `data/stock_analysis.db-shm`
+- `data/us_universe.last_good.json`
 
-It deliberately does **not** cache the entire `data/` directory, so provider caches and temporary market-data files do not become part of the long-lived research state.
+It deliberately does **not** cache the entire `data/` directory, so unrelated
+provider caches and temporary market-data files do not become part of the
+long-lived research state. The universe cache is source-labelled and expires
+after seven days by default.
 
 The database contains the candidate pool and the research history needed by the US research pipeline, including candidate lifecycle state, financial snapshots, financial-change comparisons, and research-priority event history.
 
@@ -94,6 +99,31 @@ If `US_RESEARCH_STATEFUL_ENABLED=true` but `US_RESEARCH_ALERTS_ENABLED` is absen
 The workflow passes the configured Telegram secrets into the existing notification layer and defaults the alert route to `telegram` when no `NOTIFICATION_ALERT_CHANNELS` override is configured. Default research-alert noise controls are 24-hour deduplication and a 6-hour per-symbol/severity cooldown; repository notification variables can override them.
 
 The workflow internally sets `US_RESEARCH_SCAN_ENABLED=true` only for the stateful scan process. Therefore, for cloud use, keep the legacy optional US research scan in `00-daily-analysis.yml` disabled (`US_RESEARCH_SCAN_ENABLED=false`) to avoid running the same research scan twice on separate ephemeral runners.
+
+## Universe coverage guard
+
+The research workflow targets the deduplicated `S&P 500 + Nasdaq 100`
+universe. Live constituent pages are fetched with bounded retries and an
+explicit user agent. A successful full-universe resolution is saved in the
+state cache and can be reused during a temporary constituent-source outage.
+
+Every report exposes the requested universe source, resolved source, planned
+ticker count, successful snapshot count, and snapshot coverage ratio. The
+default publication requirements are:
+
+```text
+US_RESEARCH_REQUIRED_UNIVERSE_SOURCE=sp500_nasdaq100
+US_RESEARCH_MIN_UNIVERSE_SIZE=400
+US_RESEARCH_MIN_UNIVERSE_COVERAGE=0.80
+SCREENING_US_UNIVERSE_CACHE_MAX_AGE_HOURS=168
+```
+
+If the resolved source is a smaller fallback, the universe contains fewer
+than 400 tickers, or fewer than 80% of planned tickers produce valid snapshots,
+the run still uploads a diagnostic report but suppresses its candidate list.
+It does not update candidate lifecycle/history and does not dispatch Telegram
+research alerts. This prevents a partial universe from being presented as a
+complete market ranking.
 
 ## Operational note
 

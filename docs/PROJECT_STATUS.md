@@ -63,7 +63,8 @@ Grades: A = 80–100, B = 65–79, C = 50–64, D < 50.
 - `US_RESEARCH_SCAN_ENABLED = false`
 - Telegram test message was received successfully.
 - The first manual real stateful scan completed successfully with checkpoint, SQLite validation, cache save, and report upload.
-- `US_RESEARCH_ALERTS_ENABLED` remains intentionally disabled until several real stateful scans establish a useful history baseline.
+- `US_RESEARCH_ALERTS_ENABLED = true`; transition, deduplication, cooldown, and universe-coverage gates still suppress ineligible alerts.
+- US research candidates are published only when the resolved universe is the configured `S&P 500 + Nasdaq 100` source (or its fresh matching cache), contains at least 400 tickers, and produces at least 80% valid snapshots.
 - The legacy optional US research path should remain disabled while the stateful workflow is active to avoid duplicate independent scans.
 - GitHub Actions cache is operational persistence, not a permanent backup.
 

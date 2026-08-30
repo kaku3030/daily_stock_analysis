@@ -13,13 +13,29 @@ rather than silently screening the US pool.
 
 import logging
 import os
+import json
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from html import unescape
+from io import StringIO
+from pathlib import Path
+
 import pandas as pd
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
 
 _SP500_WIKI_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 _NASDAQ100_WIKI_URL = "https://en.wikipedia.org/wiki/Nasdaq-100"
+_NASDAQ100_COMPANIES_URL = "https://www.nasdaq.com/solutions/nasdaq-100/companies"
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_UNIVERSE_CACHE_VERSION = 1
+_UNIVERSE_HTTP_TIMEOUT_SECONDS = 20.0
+_UNIVERSE_CACHE_MAX_AGE_HOURS = 24 * 7
 
 _DEFAULT_US_UNIVERSE = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "BRK-B",
@@ -31,6 +47,17 @@ _DEFAULT_US_UNIVERSE = [
 ]
 
 
+@dataclass(frozen=True)
+class USUniverseResolution:
+    """Resolved US ticker universe plus provenance for coverage validation."""
+
+    tickers: list[str]
+    requested_source: str
+    resolved_source: str
+    fallback_used: bool = False
+    errors: tuple[str, ...] = ()
+
+
 def fetch_us_universe(source: str = "auto") -> list[str]:
     """Return a list of US equity tickers.
 
@@ -40,22 +67,70 @@ def fetch_us_universe(source: str = "auto") -> list[str]:
         sp500_nasdaq100 — merge both universes and remove duplicates
         env     — read SCREENING_US_TICKERS (comma-separated)
         default — hardcoded top-50 US large-caps
-        auto    — try sp500 → env → default
+        auto    — configured source → matching cache → sp500 → env → default
     """
+    return resolve_us_universe(source).tickers
+
+
+def resolve_us_universe(source: str = "auto") -> USUniverseResolution:
+    """Resolve a US equity universe without hiding fallback provenance."""
     src = source.lower().strip()
     if src == "auto":
         configured = os.getenv("SCREENING_US_UNIVERSE_SOURCE", "sp500_nasdaq100").strip().lower()
-        sources = [configured, "sp500", "env", "default"]
-        for s in dict.fromkeys(item for item in sources if item and item != "auto"):
-            try:
-                tickers = fetch_us_universe(s)
-                if tickers:
-                    logger.info("US universe from %s: %d tickers", s, len(tickers))
-                    return tickers
-            except Exception as e:
-                logger.debug("US universe source %s failed: %s", s, e)
-        return list(_DEFAULT_US_UNIVERSE)
+        requested = configured or "sp500_nasdaq100"
+        errors: list[str] = []
+        try:
+            tickers = _fetch_us_universe_source(requested)
+            _validate_universe_size(requested, tickers)
+            _write_universe_cache(requested, tickers)
+            return USUniverseResolution(tickers, requested, requested)
+        except Exception as exc:
+            errors.append(f"{requested}: {exc}")
 
+        cached = _read_universe_cache(requested)
+        if cached:
+            return USUniverseResolution(
+                cached,
+                requested,
+                f"cache:{requested}",
+                fallback_used=True,
+                errors=tuple(errors),
+            )
+
+        for fallback in ("sp500", "env", "default"):
+            if fallback == requested:
+                continue
+            try:
+                tickers = _fetch_us_universe_source(fallback)
+                if tickers:
+                    logger.warning(
+                        "US universe %s unavailable; falling back to %s (%d tickers)",
+                        requested,
+                        fallback,
+                        len(tickers),
+                    )
+                    return USUniverseResolution(
+                        tickers,
+                        requested,
+                        fallback,
+                        fallback_used=True,
+                        errors=tuple(errors),
+                    )
+            except Exception as exc:
+                errors.append(f"{fallback}: {exc}")
+        return USUniverseResolution(
+            list(_DEFAULT_US_UNIVERSE),
+            requested,
+            "default",
+            fallback_used=True,
+            errors=tuple(errors),
+        )
+
+    tickers = _fetch_us_universe_source(src)
+    return USUniverseResolution(tickers, src, src)
+
+
+def _fetch_us_universe_source(src: str) -> list[str]:
     if src == "sp500":
         return _fetch_sp500_tickers()
     elif src == "nasdaq100":
@@ -70,11 +145,11 @@ def fetch_us_universe(source: str = "auto") -> list[str]:
     elif src == "default":
         return list(_DEFAULT_US_UNIVERSE)
     else:
-        raise ValueError(f"Unknown US universe source: {source}")
+        raise ValueError(f"Unknown US universe source: {src}")
 
 
 def _fetch_sp500_tickers() -> list[str]:
-    tables = pd.read_html(_SP500_WIKI_URL)
+    tables = _read_html_tables(_SP500_WIKI_URL)
     for tbl in tables:
         if "Symbol" in tbl.columns:
             return sorted(tbl["Symbol"].dropna().str.strip().str.replace(".", "-", regex=False).tolist())
@@ -82,7 +157,13 @@ def _fetch_sp500_tickers() -> list[str]:
 
 
 def _fetch_nasdaq100_tickers() -> list[str]:
-    tables = pd.read_html(_NASDAQ100_WIKI_URL)
+    official_error: Exception | None = None
+    try:
+        return _fetch_nasdaq100_official_tickers()
+    except Exception as exc:
+        official_error = exc
+
+    tables = _read_html_tables(_NASDAQ100_WIKI_URL)
     for table in tables:
         symbol_column = next(
             (column for column in table.columns if str(column).strip().lower() in {"ticker", "symbol"}),
@@ -97,7 +178,139 @@ def _fetch_nasdaq100_tickers() -> list[str]:
                 .str.replace(".", "-", regex=False)
                 .tolist()
             )
-    raise RuntimeError("Could not find ticker column in NASDAQ-100 Wikipedia table")
+    raise RuntimeError(
+        "Could not resolve Nasdaq-100 constituents from Nasdaq or Wikipedia: "
+        f"nasdaq={official_error}; wikipedia=ticker column missing"
+    )
+
+
+def _fetch_nasdaq100_official_tickers() -> list[str]:
+    html = _fetch_html_text(_NASDAQ100_COMPANIES_URL)
+    script_blocks = re.findall(
+        r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    for block in script_blocks:
+        try:
+            payload = json.loads(unescape(block).strip())
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        for candidate in _walk_json_objects(payload):
+            if candidate.get("name") != "Nasdaq-100 Company Breakdown":
+                continue
+            items = candidate.get("itemListElement")
+            if not isinstance(items, list):
+                continue
+            tickers = sorted({
+                str(item.get("description") or "").strip().upper().replace(".", "-")
+                for item in items
+                if isinstance(item, dict)
+                and re.fullmatch(
+                    r"[A-Z][A-Z0-9.-]{0,9}",
+                    str(item.get("description") or "").strip().upper(),
+                )
+            })
+            if len(tickers) >= 90:
+                return tickers
+    raise RuntimeError("Nasdaq-100 structured company list missing or incomplete")
+
+
+def _walk_json_objects(value):
+    if isinstance(value, dict):
+        yield value
+        for nested in value.values():
+            yield from _walk_json_objects(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            yield from _walk_json_objects(nested)
+
+
+def _read_html_tables(url: str) -> list[pd.DataFrame]:
+    """Read index tables with an explicit user agent and bounded retries."""
+    return pd.read_html(StringIO(_fetch_html_text(url)))
+
+
+def _fetch_html_text(url: str) -> str:
+    """Fetch one public index page with an explicit user agent and retries."""
+    retries = Retry(
+        total=2,
+        connect=2,
+        read=2,
+        backoff_factor=0.5,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset({"GET"}),
+    )
+    with requests.Session() as session:
+        session.mount("https://", HTTPAdapter(max_retries=retries))
+        response = session.get(
+            url,
+            headers={"User-Agent": "daily_stock_analysis/US-research-universe"},
+            timeout=_UNIVERSE_HTTP_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    return response.text
+
+
+def _universe_cache_path() -> Path:
+    configured = os.getenv("SCREENING_US_UNIVERSE_CACHE_PATH", "").strip()
+    return Path(configured) if configured else _PROJECT_ROOT / "data" / "us_universe.last_good.json"
+
+
+def _write_universe_cache(source: str, tickers: list[str]) -> None:
+    if not tickers:
+        return
+    path = _universe_cache_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": _UNIVERSE_CACHE_VERSION,
+            "source": source,
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "tickers": sorted(set(tickers)),
+        }
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as exc:
+        logger.warning("Could not persist US universe cache %s: %s", path, exc)
+
+
+def _validate_universe_size(source: str, tickers: list[str]) -> None:
+    minimums = {
+        "sp500": 450,
+        "nasdaq100": 90,
+        "sp500_nasdaq100": 400,
+        "combined": 400,
+    }
+    minimum = minimums.get(source, 1)
+    if len(tickers) < minimum:
+        raise RuntimeError(
+            f"universe source {source} returned {len(tickers)} tickers; minimum={minimum}"
+        )
+
+
+def _read_universe_cache(source: str) -> list[str]:
+    path = _universe_cache_path()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if payload.get("version") != _UNIVERSE_CACHE_VERSION or payload.get("source") != source:
+            return []
+        captured_at = datetime.fromisoformat(str(payload["captured_at"]).replace("Z", "+00:00"))
+        age_hours = (datetime.now(timezone.utc) - captured_at.astimezone(timezone.utc)).total_seconds() / 3600
+        max_age = max(
+            0.0,
+            float(os.getenv("SCREENING_US_UNIVERSE_CACHE_MAX_AGE_HOURS", _UNIVERSE_CACHE_MAX_AGE_HOURS)),
+        )
+        if age_hours > max_age:
+            return []
+        tickers = sorted({
+            str(item).strip()
+            for item in payload.get("tickers", [])
+            if str(item).strip()
+        })
+        _validate_universe_size(source, tickers)
+        return tickers
+    except (FileNotFoundError, KeyError, TypeError, ValueError, RuntimeError, json.JSONDecodeError):
+        return []
 
 
 def fetch_us_snapshot(
@@ -116,7 +329,10 @@ def fetch_us_snapshot(
     import yfinance as yf
 
     if tickers is None:
-        tickers = fetch_us_universe(universe_source)
+        resolution = resolve_us_universe(universe_source)
+        tickers = resolution.tickers
+    else:
+        resolution = USUniverseResolution(list(tickers), "explicit", "explicit")
 
     logger.info("Fetching US snapshot for %d tickers", len(tickers))
 
@@ -210,6 +426,13 @@ def fetch_us_snapshot(
     _enrich_info_fields(df)
 
     df.attrs["snapshot_source"] = "yfinance"
+    df.attrs["universe_requested_source"] = resolution.requested_source
+    df.attrs["universe_source"] = resolution.resolved_source
+    df.attrs["universe_count"] = len(tickers)
+    df.attrs["universe_snapshot_count"] = len(df)
+    df.attrs["universe_coverage_ratio"] = round(len(df) / len(tickers), 6) if tickers else 0.0
+    df.attrs["universe_fallback_used"] = resolution.fallback_used
+    df.attrs["universe_errors"] = list(resolution.errors)
     logger.info("US snapshot: %d rows from yfinance", len(df))
     return df
 
