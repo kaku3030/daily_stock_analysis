@@ -8,6 +8,20 @@ on:
   schedule:
     - cron: '20 10 * * 1-5'
   workflow_dispatch:
+    inputs:
+      action:
+        description: '手动操作'
+        required: true
+        default: 'telegram-test'
+        type: choice
+        options:
+          - telegram-test
+          - scan
+      send_alerts:
+        description: '本次 scan 允许发送研究事件提醒'
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: us-research-stateful
@@ -72,8 +86,53 @@ jobs:
           print('✅ GitHub Cache -> SQLite roundtrip verified')
           PY
 
+  telegram-test:
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'telegram-test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Send Telegram test message
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+
+          token = os.getenv('TELEGRAM_BOT_TOKEN', '').strip()
+          chat_id = os.getenv('TELEGRAM_CHAT_ID', '').strip()
+          if not token:
+              raise SystemExit('TELEGRAM_BOT_TOKEN is not configured')
+          if not chat_id:
+              raise SystemExit('TELEGRAM_CHAT_ID is not configured')
+
+          payload = urllib.parse.urlencode({
+              'chat_id': chat_id,
+              'text': '✅ daily_stock_analysis Telegram 通知测试成功\n\n研究提醒通道已经连接。',
+          }).encode('utf-8')
+          request = urllib.request.Request(
+              f'https://api.telegram.org/bot{token}/sendMessage',
+              data=payload,
+              method='POST',
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  result = json.loads(response.read().decode('utf-8'))
+          except Exception as exc:
+              raise SystemExit(f'Telegram test request failed: {exc}') from exc
+          if not result.get('ok'):
+              raise SystemExit(f'Telegram API rejected the test: {result}')
+          message_id = (result.get('result') or {}).get('message_id')
+          print(f'✅ Telegram test delivered, message_id={message_id}')
+          PY
+
   scan:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && vars.US_RESEARCH_STATEFUL_ENABLED == 'true')
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.action == 'scan') ||
+      (github.event_name == 'schedule' && vars.US_RESEARCH_STATEFUL_ENABLED == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -194,12 +253,36 @@ jobs:
           BRAVE_API_KEYS: ${{ secrets.BRAVE_API_KEYS }}
           SEARXNG_BASE_URLS: ${{ vars.SEARXNG_BASE_URLS || secrets.SEARXNG_BASE_URLS }}
           SEARXNG_PUBLIC_INSTANCES_ENABLED: ${{ vars.SEARXNG_PUBLIC_INSTANCES_ENABLED || secrets.SEARXNG_PUBLIC_INSTANCES_ENABLED }}
+
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TELEGRAM_MESSAGE_THREAD_ID }}
+          NOTIFICATION_ALERT_CHANNELS: ${{ vars.NOTIFICATION_ALERT_CHANNELS || secrets.NOTIFICATION_ALERT_CHANNELS || 'telegram' }}
+          NOTIFICATION_DEDUP_TTL_SECONDS: ${{ vars.NOTIFICATION_DEDUP_TTL_SECONDS || secrets.NOTIFICATION_DEDUP_TTL_SECONDS || '86400' }}
+          NOTIFICATION_COOLDOWN_SECONDS: ${{ vars.NOTIFICATION_COOLDOWN_SECONDS || secrets.NOTIFICATION_COOLDOWN_SECONDS || '21600' }}
+          NOTIFICATION_TIMEZONE: ${{ vars.NOTIFICATION_TIMEZONE || secrets.NOTIFICATION_TIMEZONE || 'Asia/Tokyo' }}
+
+          SCHEDULED_ALERTS_ENABLED: ${{ vars.US_RESEARCH_ALERTS_ENABLED || 'false' }}
+          MANUAL_ALERTS_ENABLED: ${{ inputs.send_alerts || false }}
         run: |
           if [ -n "$LITELLM_CONFIG_YAML" ] && [ -n "$LITELLM_CONFIG" ]; then
             mkdir -p "$(dirname "$LITELLM_CONFIG")"
             echo "$LITELLM_CONFIG_YAML" > "$LITELLM_CONFIG"
           fi
-          python scripts/run_us_research_scan.py
+
+          ALERT_ARG=""
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "${SCHEDULED_ALERTS_ENABLED,,}" = "true" ]; then
+            ALERT_ARG="--send-research-alerts"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${MANUAL_ALERTS_ENABLED,,}" = "true" ]; then
+            ALERT_ARG="--send-research-alerts"
+          fi
+
+          if [ -n "$ALERT_ARG" ]; then
+            echo "📨 研究事件真实通知：已启用"
+          else
+            echo "🔕 研究事件真实通知：未启用，仅生成提醒候选"
+          fi
+          python scripts/run_us_research_scan.py $ALERT_ARG
 
       - name: Checkpoint and validate research state
         if: always() && hashFiles('data/stock_analysis.db') != ''
