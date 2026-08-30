@@ -3,7 +3,7 @@
 
 The candidate pool is intentionally small and stateful: each screening run refreshes
 current research metadata for selected symbols while preserving first/last selection
-timestamps and selection counts.  Absence from one scan does not delete a candidate;
+timestamps and selection counts. Absence from one scan does not delete a candidate;
 retirement/decay rules belong to a later phase.
 """
 
@@ -11,10 +11,19 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 
-from sqlalchemy import Column, DateTime, Float, Index, Integer, String, Text, UniqueConstraint, select
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Float,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    select,
+)
 
 from src.storage import Base, DatabaseManager, utc_naive_now
 
@@ -39,15 +48,39 @@ class CandidatePoolRecord(Base):
     factor_scores_json = Column(Text, default="{}")
     catalysts_json = Column(Text, default="[]")
     risks_json = Column(Text, default="[]")
-    first_selected_at = Column(DateTime, nullable=False, default=utc_naive_now, index=True)
-    last_selected_at = Column(DateTime, nullable=False, default=utc_naive_now, index=True)
+    first_selected_at = Column(
+        DateTime,
+        nullable=False,
+        default=utc_naive_now,
+        index=True,
+    )
+    last_selected_at = Column(
+        DateTime,
+        nullable=False,
+        default=utc_naive_now,
+        index=True,
+    )
     selected_count = Column(Integer, nullable=False, default=1)
     created_at = Column(DateTime, nullable=False, default=utc_naive_now)
-    updated_at = Column(DateTime, nullable=False, default=utc_naive_now, onupdate=utc_naive_now)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=utc_naive_now,
+        onupdate=utc_naive_now,
+    )
 
     __table_args__ = (
-        UniqueConstraint("market", "code", name="uix_research_candidate_market_code"),
-        Index("ix_research_candidate_market_status_score", "market", "status", "score"),
+        UniqueConstraint(
+            "market",
+            "code",
+            name="uix_research_candidate_market_code",
+        ),
+        Index(
+            "ix_research_candidate_market_status_score",
+            "market",
+            "status",
+            "score",
+        ),
     )
 
 
@@ -72,7 +105,12 @@ def candidate_grade(score: float) -> str:
 def _json(value: Any, fallback: Any) -> str:
     if value is None:
         value = fallback
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        default=str,
+    )
 
 
 class CandidatePoolRepository:
@@ -80,12 +118,15 @@ class CandidatePoolRepository:
 
     def __init__(self, db_manager: Optional[DatabaseManager] = None):
         self.db = db_manager or DatabaseManager.get_instance()
-        # This model intentionally lives outside storage.py to keep the phase-one
-        # change isolated.  Explicit checkfirst creation also covers processes that
+        # This model intentionally lives outside storage.py to keep phase one
+        # isolated. Explicit checkfirst creation also covers processes that
         # instantiated DatabaseManager before importing this repository module.
         CandidatePoolRecord.__table__.create(self.db._engine, checkfirst=True)
 
-    def sync_from_screen_result(self, payload: Dict[str, Any]) -> CandidatePoolSyncStats:
+    def sync_from_screen_result(
+        self,
+        payload: Dict[str, Any],
+    ) -> CandidatePoolSyncStats:
         """Upsert selected picks without removing candidates absent from this run."""
 
         market = str(payload.get("market") or "us").strip().lower()
@@ -117,7 +158,11 @@ class CandidatePoolRepository:
                     "industry": str(pick.get("industry") or ""),
                     "source_strategy": strategy,
                     "source_run_id": run_id,
-                    "ranking_reason": str(pick.get("ranking_reason") or pick.get("llm_thesis") or ""),
+                    "ranking_reason": str(
+                        pick.get("ranking_reason")
+                        or pick.get("llm_thesis")
+                        or ""
+                    ),
                     "risk_summary": str(pick.get("risk_summary") or ""),
                     "factor_scores_json": _json(pick.get("factor_scores"), {}),
                     "catalysts_json": _json(pick.get("llm_catalysts"), []),
@@ -147,15 +192,26 @@ class CandidatePoolRepository:
 
             return CandidatePoolSyncStats(inserted=inserted, updated=updated)
 
-        return self.db._run_write_transaction("sync research candidate pool", _sync)
+        return self.db._run_write_transaction(
+            "sync research candidate pool",
+            _sync,
+        )
 
-    def list_active(self, market: Optional[str] = None, limit: int = 100) -> List[CandidatePoolRecord]:
-        """Return active candidates ordered by grade/score freshness."""
+    def list_active(
+        self,
+        market: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[CandidatePoolRecord]:
+        """Return active candidates ordered by score and selection freshness."""
 
         with self.db.get_session() as session:
-            statement = select(CandidatePoolRecord).where(CandidatePoolRecord.status == "active")
+            statement = select(CandidatePoolRecord).where(
+                CandidatePoolRecord.status == "active"
+            )
             if market:
-                statement = statement.where(CandidatePoolRecord.market == market.strip().lower())
+                statement = statement.where(
+                    CandidatePoolRecord.market == market.strip().lower()
+                )
             statement = statement.order_by(
                 CandidatePoolRecord.score.desc(),
                 CandidatePoolRecord.last_selected_at.desc(),
