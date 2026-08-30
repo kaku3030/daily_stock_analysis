@@ -173,7 +173,10 @@ def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
             research_event_snapshot_to_dict(row)
             for row in event_repo.list_run(market, run_id)
         ]
-        latest_event_changes = event_repo.latest_change_map(market)
+        current_event_changes = {
+            str(row.get("code") or ""): row.get("detail") or {}
+            for row in current_event_rows
+        }
 
         candidates = [
             candidate_to_dict(record)
@@ -182,7 +185,10 @@ def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
         for candidate in candidates:
             code = str(candidate.get("code") or "")
             candidate["financial_change"] = latest_changes.get(code, {})
-            candidate["news_change"] = latest_event_changes.get(code, {})
+            # Only the current run may affect today's research priority. Historical
+            # event snapshots stay in SQLite for comparison but must not replay an
+            # old new_risk/new_catalyst on candidates absent from this scan.
+            candidate["news_change"] = current_event_changes.get(code, {})
 
         industry_radar = build_industry_radar(candidates)
         priority_events = build_research_priority_events(candidates, industry_radar)
