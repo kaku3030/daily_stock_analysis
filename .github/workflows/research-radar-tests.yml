@@ -13,6 +13,7 @@ on:
       - "src/services/screening/financial_change.py"
       - "src/services/screening/financial_change_radar.py"
       - "src/services/screening/research_priority.py"
+      - "src/services/screening/research_priority_transition.py"
       - "scripts/run_us_research_scan.py"
       - "tests/test_candidate_pool_repo.py"
       - "tests/test_candidate_pool_industry_metrics.py"
@@ -23,6 +24,7 @@ on:
       - "tests/test_financial_change_repo.py"
       - "tests/test_research_priority.py"
       - "tests/test_research_priority_repo.py"
+      - "tests/test_research_priority_transition.py"
       - ".github/workflows/research-radar-tests.yml"
   workflow_dispatch:
 
@@ -57,7 +59,8 @@ jobs:
             tests/test_financial_change.py \
             tests/test_financial_change_repo.py \
             tests/test_research_priority.py \
-            tests/test_research_priority_repo.py
+            tests/test_research_priority_repo.py \
+            tests/test_research_priority_transition.py
 
       - name: Import smoke test for US research scan
         run: python -c "import scripts.run_us_research_scan; print('run_us_research_scan import ok')"

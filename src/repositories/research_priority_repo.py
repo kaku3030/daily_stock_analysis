@@ -28,18 +28,8 @@ class ResearchPriorityEventRecord(Base):
     created_at = Column(DateTime, nullable=False, default=utc_naive_now)
 
     __table_args__ = (
-        UniqueConstraint(
-            "market",
-            "code",
-            "run_id",
-            name="uix_research_priority_event_run",
-        ),
-        Index(
-            "ix_research_priority_event_symbol_time",
-            "market",
-            "code",
-            "observed_at",
-        ),
+        UniqueConstraint("market", "code", "run_id", name="uix_research_priority_event_run"),
+        Index("ix_research_priority_event_symbol_time", "market", "code", "observed_at"),
     )
 
 
@@ -67,12 +57,7 @@ class ResearchPriorityEventRepository:
         self.db = db_manager or DatabaseManager.get_instance()
         ResearchPriorityEventRecord.__table__.create(self.db._engine, checkfirst=True)
 
-    def sync_run(
-        self,
-        market: str,
-        run_id: str,
-        events: list[dict[str, Any]],
-    ) -> int:
+    def sync_run(self, market: str, run_id: str, events: list[dict[str, Any]]) -> int:
         market = market.strip().lower()
         run_id = run_id.strip()
         if not run_id:
@@ -94,50 +79,63 @@ class ResearchPriorityEventRepository:
                 ).scalar_one_or_none()
                 if existing is not None:
                     continue
-                session.add(
-                    ResearchPriorityEventRecord(
-                        market=market,
-                        code=code,
-                        run_id=run_id,
-                        observed_at=observed_at,
-                        priority_level=str(event.get("priority_level") or "low"),
-                        priority_score=float(event.get("priority_score") or 0.0),
-                        event_type=str(event.get("event_type") or "priority_refresh"),
-                        research_tone=str(event.get("research_tone") or "neutral"),
-                        notification_ready=bool(event.get("notification_ready")),
-                        event_json=json.dumps(
-                            event,
-                            ensure_ascii=False,
-                            separators=(",", ":"),
-                            default=str,
-                        ),
-                    )
-                )
+                session.add(ResearchPriorityEventRecord(
+                    market=market,
+                    code=code,
+                    run_id=run_id,
+                    observed_at=observed_at,
+                    priority_level=str(event.get("priority_level") or "low"),
+                    priority_score=float(event.get("priority_score") or 0.0),
+                    event_type=str(event.get("event_type") or "priority_refresh"),
+                    research_tone=str(event.get("research_tone") or "neutral"),
+                    notification_ready=bool(event.get("notification_ready")),
+                    event_json=json.dumps(event, ensure_ascii=False, separators=(",", ":"), default=str),
+                ))
                 inserted += 1
             return inserted
 
         return self.db._run_write_transaction("sync research priority events", _sync)
 
     def list_latest(self, market: str, limit: int = 200) -> list[ResearchPriorityEventRecord]:
+        return list(self.latest_map(market, limit=limit).values())
+
+    def latest_map(
+        self,
+        market: str,
+        *,
+        exclude_run_id: str | None = None,
+        limit: int = 200,
+    ) -> dict[str, ResearchPriorityEventRecord]:
         market = market.strip().lower()
         with self.db.get_session() as session:
-            rows = list(
-                session.execute(
-                    select(ResearchPriorityEventRecord)
-                    .where(ResearchPriorityEventRecord.market == market)
-                    .order_by(
-                        ResearchPriorityEventRecord.observed_at.desc(),
-                        ResearchPriorityEventRecord.id.desc(),
-                    )
-                ).scalars().all()
-            )
-        latest: list[ResearchPriorityEventRecord] = []
-        seen: set[str] = set()
+            query = select(ResearchPriorityEventRecord).where(ResearchPriorityEventRecord.market == market)
+            if exclude_run_id:
+                query = query.where(ResearchPriorityEventRecord.run_id != exclude_run_id)
+            rows = list(session.execute(
+                query.order_by(
+                    ResearchPriorityEventRecord.observed_at.desc(),
+                    ResearchPriorityEventRecord.id.desc(),
+                )
+            ).scalars().all())
+        latest: dict[str, ResearchPriorityEventRecord] = {}
         for row in rows:
-            if row.code in seen:
+            if row.code in latest:
                 continue
-            latest.append(row)
-            seen.add(row.code)
+            latest[row.code] = row
             if len(latest) >= max(1, limit):
                 break
         return latest
+
+    def latest_payload_map(
+        self,
+        market: str,
+        *,
+        exclude_run_id: str | None = None,
+        limit: int = 200,
+    ) -> dict[str, dict[str, Any]]:
+        result: dict[str, dict[str, Any]] = {}
+        for code, record in self.latest_map(market, exclude_run_id=exclude_run_id, limit=limit).items():
+            serialized = research_priority_event_to_dict(record)
+            detail = serialized.get("detail")
+            result[code] = detail if isinstance(detail, dict) else serialized
+        return result

@@ -32,6 +32,10 @@ from src.services.screening.research_priority import (
     build_research_priority_events,
     research_priority_markdown,
 )
+from src.services.screening.research_priority_transition import (
+    build_research_priority_alerts,
+    research_priority_alerts_markdown,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,14 +61,11 @@ def _markdown(payload: dict) -> str:
         "|---:|---|---:|---|---|---|",
     ]
     for pick in payload.get("picks", []):
-        reason = str(
-            pick.get("ranking_reason") or pick.get("llm_thesis") or "待进一步研究"
-        ).replace("|", "/")
+        reason = str(pick.get("ranking_reason") or pick.get("llm_thesis") or "待进一步研究").replace("|", "/")
         risk = str(pick.get("risk_summary") or "未识别重大风险").replace("|", "/")
         lines.append(
             f"| {pick.get('rank', '')} | {pick.get('code', '')} {pick.get('name', '')} | "
-            f"{float(pick.get('final_score') or 0):.1f} | {pick.get('industry', '')} | "
-            f"{reason} | {risk} |"
+            f"{float(pick.get('final_score') or 0):.1f} | {pick.get('industry', '')} | {reason} | {risk} |"
         )
     degradations = payload.get("degradation") or []
     if degradations:
@@ -85,14 +86,12 @@ def _candidate_pool_markdown(candidates: list[dict]) -> str:
         rows = [row for row in candidates if row.get("status") == status]
         if not rows:
             continue
-        lines.extend(
-            [
-                f"## {labels[status]}",
-                "",
-                "| 等级 | 股票 | 研究分 | 优先级 | 行业 | 入选次数 | 连续未入选 | 最近入选 | 核心理由 | 主要风险 |",
-                "|---|---|---:|---|---|---:|---:|---|---|---|",
-            ]
-        )
+        lines.extend([
+            f"## {labels[status]}",
+            "",
+            "| 等级 | 股票 | 研究分 | 优先级 | 行业 | 入选次数 | 连续未入选 | 最近入选 | 核心理由 | 主要风险 |",
+            "|---|---|---:|---|---|---:|---:|---|---|---|",
+        ])
         for row in rows:
             reason = str(row.get("ranking_reason") or "待进一步研究").replace("|", "/")
             risk = str(row.get("risk_summary") or "未识别重大风险").replace("|", "/")
@@ -110,12 +109,7 @@ def _candidate_pool_markdown(candidates: list[dict]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _write_json_markdown(
-    output_dir: Path,
-    stem: str,
-    payload: object,
-    markdown: str,
-) -> None:
+def _write_json_markdown(output_dir: Path, stem: str, payload: object, markdown: str) -> None:
     (output_dir / f"{stem}.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
@@ -142,24 +136,27 @@ def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
             for record in repo.list_candidates(market=market, include_retired=True)
         ]
         for candidate in candidates:
-            candidate["financial_change"] = latest_changes.get(
-                str(candidate.get("code") or ""),
-                {},
-            )
+            candidate["financial_change"] = latest_changes.get(str(candidate.get("code") or ""), {})
 
         industry_radar = build_industry_radar(candidates)
         priority_events = build_research_priority_events(candidates, industry_radar)
         priority_repo = ResearchPriorityEventRepository(repo.db)
+        previous_priority_events = priority_repo.latest_payload_map(
+            market,
+            exclude_run_id=run_id,
+        )
+        priority_alerts = build_research_priority_alerts(
+            priority_events,
+            previous_priority_events,
+        )
         priority_event_count = priority_repo.sync_run(market, run_id, priority_events)
-        priority_map = {
-            str(event.get("code") or ""): event
-            for event in priority_events
-        }
+
+        priority_map = {str(event.get("code") or ""): event for event in priority_events}
+        alert_map = {str(alert.get("code") or ""): alert for alert in priority_alerts}
         for candidate in candidates:
-            candidate["research_priority"] = priority_map.get(
-                str(candidate.get("code") or ""),
-                {},
-            )
+            code = str(candidate.get("code") or "")
+            candidate["research_priority"] = priority_map.get(code, {})
+            candidate["research_alert"] = alert_map.get(code, {})
 
         _write_json_markdown(
             output_dir,
@@ -195,11 +192,16 @@ def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
             priority_events,
             research_priority_markdown(priority_events),
         )
+        _write_json_markdown(
+            output_dir,
+            "us_research_priority_alerts",
+            priority_alerts,
+            research_priority_alerts_markdown(priority_alerts),
+        )
 
         logger.info(
-            "Candidate pool synced: inserted=%d updated=%d aged=%d watching=%d "
-            "retired=%d reactivated=%d financial_snapshots=%d financial_changes=%d "
-            "priority_events=%d",
+            "Candidate pool synced: inserted=%d updated=%d aged=%d watching=%d retired=%d "
+            "reactivated=%d financial_snapshots=%d financial_changes=%d priority_events=%d priority_alerts=%d",
             stats.inserted,
             stats.updated,
             stats.aged,
@@ -209,11 +211,10 @@ def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
             stats.financial_snapshots,
             change_count,
             priority_event_count,
+            len(priority_alerts),
         )
     except Exception:
-        logger.exception(
-            "Candidate pool sync failed; daily research report remains available"
-        )
+        logger.exception("Candidate pool sync failed; daily research report remains available")
 
 
 def main() -> int:
@@ -229,15 +230,9 @@ def main() -> int:
         max_output=max(1, int(os.getenv("US_RESEARCH_MAX_RESULTS", "10"))),
         use_llm=_enabled("US_RESEARCH_LLM_ENABLED", True),
         daily_enrich=True,
-        daily_enrich_max_candidates=max(
-            20,
-            int(os.getenv("US_RESEARCH_DAILY_CANDIDATES", "40")),
-        ),
+        daily_enrich_max_candidates=max(20, int(os.getenv("US_RESEARCH_DAILY_CANDIDATES", "40"))),
         collect_llm_candidate_context=True,
-        candidate_context_max_candidates=max(
-            5,
-            int(os.getenv("US_RESEARCH_CONTEXT_CANDIDATES", "20")),
-        ),
+        candidate_context_max_candidates=max(5, int(os.getenv("US_RESEARCH_CONTEXT_CANDIDATES", "20"))),
         post_analyzers=["scorecard"],
         config=config,
     )
@@ -246,15 +241,9 @@ def main() -> int:
         json.dumps(payload, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
     )
-    (output_dir / "us_research_candidates.md").write_text(
-        _markdown(payload),
-        encoding="utf-8",
-    )
+    (output_dir / "us_research_candidates.md").write_text(_markdown(payload), encoding="utf-8")
     _sync_candidate_pool(payload, output_dir)
-    logger.info(
-        "US research scan completed with %d candidates",
-        len(payload.get("picks", [])),
-    )
+    logger.info("US research scan completed with %d candidates", len(payload.get("picks", [])))
     return 0
 
 
