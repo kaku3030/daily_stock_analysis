@@ -16,6 +16,10 @@ from src.repositories.candidate_pool_repo import (
     candidate_to_dict,
 )
 from src.services.screening.config import Config
+from src.services.screening.earnings_valuation_radar import (
+    build_earnings_valuation_radar,
+    earnings_valuation_radar_markdown,
+)
 from src.services.screening.industry_radar import (
     build_industry_radar,
     industry_radar_markdown,
@@ -68,7 +72,6 @@ def _candidate_pool_markdown(candidates: list[dict]) -> str:
         "> active=持续关注，watching=连续2次未入选，retired=连续5次未入选。重新入选会自动恢复 active。",
         "",
     ]
-
     labels = {
         "active": "持续关注",
         "watching": "观察降温",
@@ -97,7 +100,6 @@ def _candidate_pool_markdown(candidates: list[dict]) -> str:
                 f"{last_selected} | {reason} | {risk} |"
             )
         lines.append("")
-
     if len(lines) == 5:
         lines.append("当前候选池为空。")
     return "\n".join(lines).rstrip() + "\n"
@@ -115,8 +117,23 @@ def _write_industry_radar(candidates: list[dict], output_dir: Path) -> None:
     )
 
 
+def _write_earnings_valuation_radar(
+    candidates: list[dict],
+    output_dir: Path,
+) -> None:
+    radar = build_earnings_valuation_radar(candidates)
+    (output_dir / "us_research_earnings_valuation_radar.json").write_text(
+        json.dumps(radar, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+    (output_dir / "us_research_earnings_valuation_radar.md").write_text(
+        earnings_valuation_radar_markdown(radar),
+        encoding="utf-8",
+    )
+
+
 def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
-    """Persist current picks and emit long-lived pool + industry snapshots."""
+    """Persist picks and emit long-lived research radar snapshots."""
 
     try:
         repo = CandidatePoolRepository()
@@ -134,19 +151,22 @@ def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
             encoding="utf-8",
         )
         _write_industry_radar(candidates, output_dir)
+        _write_earnings_valuation_radar(candidates, output_dir)
         logger.info(
-            "Candidate pool synced: inserted=%d updated=%d aged=%d watching=%d retired=%d reactivated=%d",
+            "Candidate pool synced: inserted=%d updated=%d aged=%d watching=%d "
+            "retired=%d reactivated=%d financial_snapshots=%d",
             stats.inserted,
             stats.updated,
             stats.aged,
             stats.watching,
             stats.retired,
             stats.reactivated,
+            stats.financial_snapshots,
         )
     except Exception:
-        # Research scan is deliberately fail-open. A DB/storage/report problem must
-        # not suppress the daily JSON/Markdown outputs operators already rely on.
-        logger.exception("Candidate pool sync failed; daily research report remains available")
+        logger.exception(
+            "Candidate pool sync failed; daily research report remains available"
+        )
 
 
 def main() -> int:
@@ -162,9 +182,15 @@ def main() -> int:
         max_output=max(1, int(os.getenv("US_RESEARCH_MAX_RESULTS", "10"))),
         use_llm=_enabled("US_RESEARCH_LLM_ENABLED", True),
         daily_enrich=True,
-        daily_enrich_max_candidates=max(20, int(os.getenv("US_RESEARCH_DAILY_CANDIDATES", "40"))),
+        daily_enrich_max_candidates=max(
+            20,
+            int(os.getenv("US_RESEARCH_DAILY_CANDIDATES", "40")),
+        ),
         collect_llm_candidate_context=True,
-        candidate_context_max_candidates=max(5, int(os.getenv("US_RESEARCH_CONTEXT_CANDIDATES", "20"))),
+        candidate_context_max_candidates=max(
+            5,
+            int(os.getenv("US_RESEARCH_CONTEXT_CANDIDATES", "20")),
+        ),
         post_analyzers=["scorecard"],
         config=config,
     )
@@ -173,9 +199,15 @@ def main() -> int:
         json.dumps(payload, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
     )
-    (output_dir / "us_research_candidates.md").write_text(_markdown(payload), encoding="utf-8")
+    (output_dir / "us_research_candidates.md").write_text(
+        _markdown(payload),
+        encoding="utf-8",
+    )
     _sync_candidate_pool(payload, output_dir)
-    logger.info("US research scan completed with %d candidates", len(payload.get("picks", [])))
+    logger.info(
+        "US research scan completed with %d candidates",
+        len(payload.get("picks", [])),
+    )
     return 0
 
 
