@@ -1,0 +1,74 @@
+name: us_research_priority
+display_name: 美股研究优先级
+description: 从NASDAQ 100与S&P 500中发现趋势、质量和流动性较好的研究候选
+version: "1.0"
+category: framework
+tags: [us, research, momentum, quality, liquidity]
+analysis_skills: [bull_trend, growth_quality, expectation_repricing]
+style:
+  risk_profile: balanced
+  holding_period: swing
+  execution_style: research_priority
+  market_regime: [risk_on, trend, rotation]
+  capital_profile: high_liquidity
+  ui_badge: 美股研究
+
+screening:
+  enabled: true
+  market_scope: [us]
+  hard_filters:
+    exclude_st: false
+    amount_min: 20000000
+    market_cap_min: 2000000000
+    pe_ttm_min: 0
+    pe_ttm_max: 120
+    pb_min: 0
+    pb_max: 40
+    change_pct_min: -8
+    change_pct_max: 10
+    price_min: 3
+    price_max: 5000
+  tech_weight: 0.45
+  factor_weights:
+    momentum: 0.30
+    value: 0.10
+    liquidity: 0.24
+    activity: 0.12
+    stability: 0.14
+    reversal: 0.04
+    theme_heat: 0.02
+    size: 0.04
+  scoring_profile:
+    momentum_chase_start_pct: 6.0
+    momentum_chase_penalty_slope: 12.0
+    activity_ideal_volume_ratio: 1.8
+    activity_ideal_turnover_rate: 2.0
+    stability_hot_change_pct: 7.0
+  risk_profile:
+    chase_change_pct: 8.0
+    abnormal_volume_ratio: 5.0
+    high_turnover_rate: 12.0
+    low_llm_confidence: 0.50
+  portfolio_profile:
+    max_same_bucket: 2
+    concentration_penalty: 5.0
+    buckets:
+      Semiconductors: [Semiconductors, Semiconductor Equipment]
+      Software: [Software, Information Technology Services]
+      Financials: [Banks, Capital Markets, Insurance]
+      Healthcare: [Biotechnology, Drug Manufacturers, Medical Devices]
+      Consumer: [Internet Retail, Auto Manufacturers, Restaurants, Apparel Retail]
+      Industrials: [Aerospace & Defense, Specialty Industrial Machinery]
+      Energy: [Oil & Gas, Energy]
+  scorecard_profile:
+    value_quality_bonus: 1.5
+    capital_confirmed_bonus: 1.5
+    volume_spike_ratio: 4.0
+    hot_money_penalty: 2.0
+  ranking_hints: |
+    目标是确定“进一步研究优先级”，不是输出交易指令。
+    优先考虑相对强度、趋势持续性、流动性、基本面质量和有日期来源的近期催化。
+    单日涨幅、15分钟信号或新闻热度不得成为唯一入选理由。
+    对新闻不足、行业过度集中、财报临近或数据不完整的候选降低置信度。
+    输出中明确核心研究假设、最重要风险、后续验证项和逻辑失效条件。
+  max_output: 10
