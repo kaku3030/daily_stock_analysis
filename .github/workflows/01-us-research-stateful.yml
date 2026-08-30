@@ -1,0 +1,203 @@
+name: US Research Stateful Scan
+
+on:
+  schedule:
+    - cron: '20 10 * * 1-5'
+  workflow_dispatch:
+
+concurrency:
+  group: us-research-stateful
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    if: github.event_name == 'workflow_dispatch' || vars.US_RESEARCH_STATEFUL_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Create state directories
+        run: mkdir -p data reports/screening logs
+
+      - name: Restore research state database
+        id: research-state-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/stock_analysis.db
+            data/stock_analysis.db-wal
+            data/stock_analysis.db-shm
+          key: us-research-state-v1-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            us-research-state-v1-${{ runner.os }}-
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Validate restored research state
+        if: steps.research-state-restore.outputs.cache-matched-key != ''
+        run: |
+          python - <<'PY'
+          import sqlite3
+          from pathlib import Path
+
+          db = Path('data/stock_analysis.db')
+          if not db.exists():
+              print('ℹ️ Cache matched but main database is absent; continuing from empty state')
+              raise SystemExit(0)
+
+          try:
+              with sqlite3.connect(db) as connection:
+                  result = connection.execute('PRAGMA quick_check').fetchone()[0]
+              if str(result).lower() != 'ok':
+                  raise RuntimeError(f'PRAGMA quick_check={result}')
+              print('✅ Restored research database: quick_check=ok')
+          except Exception as exc:
+              print(f'⚠️ Restored research database is invalid; resetting state: {exc}')
+              for suffix in ('', '-wal', '-shm'):
+                  path = Path(f'{db}{suffix}')
+                  if path.exists():
+                      path.unlink()
+          PY
+
+      - name: Run US research scan
+        env:
+          DATABASE_PATH: ./data/stock_analysis.db
+          ANALYSIS_OUTPUT_MODE: research
+          REPORT_LANGUAGE: ${{ vars.REPORT_LANGUAGE || 'zh' }}
+
+          US_RESEARCH_SCAN_ENABLED: 'true'
+          US_RESEARCH_STRATEGY: ${{ vars.US_RESEARCH_STRATEGY || 'us_research_priority' }}
+          US_RESEARCH_MAX_RESULTS: ${{ vars.US_RESEARCH_MAX_RESULTS || '10' }}
+          US_RESEARCH_DAILY_CANDIDATES: ${{ vars.US_RESEARCH_DAILY_CANDIDATES || '40' }}
+          US_RESEARCH_CONTEXT_CANDIDATES: ${{ vars.US_RESEARCH_CONTEXT_CANDIDATES || '20' }}
+          US_RESEARCH_LLM_ENABLED: ${{ vars.US_RESEARCH_LLM_ENABLED || 'true' }}
+          SCREENING_US_UNIVERSE_SOURCE: ${{ vars.SCREENING_US_UNIVERSE_SOURCE || 'sp500_nasdaq100' }}
+          INDUSTRY_PROVIDER: ${{ vars.INDUSTRY_PROVIDER || 'none' }}
+          SCREENING_SOURCE_CALL_TIMEOUT_SEC: ${{ vars.SCREENING_SOURCE_CALL_TIMEOUT_SEC }}
+          SCREENING_SNAPSHOT_CALL_TIMEOUT_SEC: ${{ vars.SCREENING_SNAPSHOT_CALL_TIMEOUT_SEC }}
+          SCREENING_DAILY_CALL_TIMEOUT_SEC: ${{ vars.SCREENING_DAILY_CALL_TIMEOUT_SEC }}
+
+          GENERATION_BACKEND: ${{ vars.GENERATION_BACKEND || secrets.GENERATION_BACKEND || 'litellm' }}
+          GENERATION_FALLBACK_BACKEND: ${{ vars.GENERATION_FALLBACK_BACKEND || secrets.GENERATION_FALLBACK_BACKEND || 'litellm' }}
+          LITELLM_CONFIG: ${{ vars.LITELLM_CONFIG || secrets.LITELLM_CONFIG }}
+          LITELLM_CONFIG_YAML: ${{ vars.LITELLM_CONFIG_YAML || secrets.LITELLM_CONFIG_YAML }}
+          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+          LITELLM_MODEL: ${{ vars.LITELLM_MODEL || secrets.LITELLM_MODEL }}
+          LITELLM_FALLBACK_MODELS: ${{ vars.LITELLM_FALLBACK_MODELS || secrets.LITELLM_FALLBACK_MODELS }}
+          LLM_CHANNELS: ${{ vars.LLM_CHANNELS || secrets.LLM_CHANNELS }}
+          LLM_TEMPERATURE: ${{ vars.LLM_TEMPERATURE || secrets.LLM_TEMPERATURE }}
+
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || secrets.GEMINI_MODEL || 'gemini-3-flash-preview' }}
+          GEMINI_MODEL_FALLBACK: ${{ vars.GEMINI_MODEL_FALLBACK || secrets.GEMINI_MODEL_FALLBACK || 'gemini-3-flash-preview' }}
+          AIHUBMIX_KEY: ${{ secrets.AIHUBMIX_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_KEYS: ${{ secrets.OPENAI_API_KEYS }}
+          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || secrets.OPENAI_BASE_URL }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || secrets.OPENAI_MODEL }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_API_KEYS: ${{ secrets.DEEPSEEK_API_KEYS }}
+          ANSPIRE_API_KEYS: ${{ secrets.ANSPIRE_API_KEYS }}
+          ANSPIRE_LLM_MODEL: ${{ vars.ANSPIRE_LLM_MODEL || secrets.ANSPIRE_LLM_MODEL }}
+          ANSPIRE_LLM_BASE_URL: ${{ vars.ANSPIRE_LLM_BASE_URL || secrets.ANSPIRE_LLM_BASE_URL }}
+          ANSPIRE_LLM_ENABLED: ${{ vars.ANSPIRE_LLM_ENABLED || secrets.ANSPIRE_LLM_ENABLED }}
+
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}
+          LONGBRIDGE_OAUTH_CLIENT_ID: ${{ vars.LONGBRIDGE_OAUTH_CLIENT_ID || secrets.LONGBRIDGE_OAUTH_CLIENT_ID }}
+          LONGBRIDGE_OAUTH_TOKEN_CACHE_B64: ${{ secrets.LONGBRIDGE_OAUTH_TOKEN_CACHE_B64 }}
+          LONGBRIDGE_APP_KEY: ${{ secrets.LONGBRIDGE_APP_KEY }}
+          LONGBRIDGE_APP_SECRET: ${{ secrets.LONGBRIDGE_APP_SECRET }}
+          LONGBRIDGE_ACCESS_TOKEN: ${{ secrets.LONGBRIDGE_ACCESS_TOKEN }}
+          LONGBRIDGE_REGION: ${{ vars.LONGBRIDGE_REGION || secrets.LONGBRIDGE_REGION }}
+
+          BOCHA_API_KEYS: ${{ secrets.BOCHA_API_KEYS }}
+          TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
+          SERPAPI_API_KEYS: ${{ secrets.SERPAPI_API_KEYS }}
+          MINIMAX_API_KEYS: ${{ secrets.MINIMAX_API_KEYS }}
+          BRAVE_API_KEYS: ${{ secrets.BRAVE_API_KEYS }}
+          SEARXNG_BASE_URLS: ${{ vars.SEARXNG_BASE_URLS || secrets.SEARXNG_BASE_URLS }}
+          SEARXNG_PUBLIC_INSTANCES_ENABLED: ${{ vars.SEARXNG_PUBLIC_INSTANCES_ENABLED || secrets.SEARXNG_PUBLIC_INSTANCES_ENABLED }}
+        run: |
+          if [ -n "$LITELLM_CONFIG_YAML" ] && [ -n "$LITELLM_CONFIG" ]; then
+            mkdir -p "$(dirname "$LITELLM_CONFIG")"
+            echo "$LITELLM_CONFIG_YAML" > "$LITELLM_CONFIG"
+          fi
+          python scripts/run_us_research_scan.py
+
+      - name: Checkpoint and validate research state
+        if: always() && hashFiles('data/stock_analysis.db') != ''
+        run: |
+          python - <<'PY'
+          import sqlite3
+          from pathlib import Path
+
+          db = Path('data/stock_analysis.db')
+          try:
+              with sqlite3.connect(db) as connection:
+                  connection.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+                  result = connection.execute('PRAGMA quick_check').fetchone()[0]
+                  if str(result).lower() != 'ok':
+                      raise RuntimeError(f'PRAGMA quick_check={result}')
+
+                  tables = {
+                      row[0]
+                      for row in connection.execute(
+                          "SELECT name FROM sqlite_master WHERE type='table'"
+                      )
+                  }
+                  tracked = (
+                      'research_candidate_pool',
+                      'research_candidate_financial_snapshots',
+                      'research_candidate_financial_changes',
+                      'research_priority_events',
+                  )
+                  for table in tracked:
+                      if table in tables:
+                          count = connection.execute(
+                              f'SELECT COUNT(*) FROM {table}'
+                          ).fetchone()[0]
+                          print(f'📚 {table}: {count} rows')
+              print('✅ Research database checkpoint complete: quick_check=ok')
+          except Exception as exc:
+              print(f'⚠️ Research state validation failed; corrupt state will not be cached: {exc}')
+              for suffix in ('', '-wal', '-shm'):
+                  path = Path(f'{db}{suffix}')
+                  if path.exists():
+                      path.unlink()
+          PY
+
+      - name: Save research state database
+        if: always() && hashFiles('data/stock_analysis.db') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            data/stock_analysis.db
+            data/stock_analysis.db-wal
+            data/stock_analysis.db-shm
+          key: us-research-state-v1-${{ runner.os }}-${{ github.run_id }}
+
+      - name: Upload research reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: us-research-reports-${{ github.run_number }}
+          path: |
+            reports/screening/
+            logs/
+          if-no-files-found: warn
+          retention-days: 30
