@@ -37,6 +37,27 @@ The persisted event history is also used as a notification gate. The gate suppre
 
 This gate deliberately does not notify on routine priority downgrades or unchanged high-priority states.
 
+## Notification dispatch
+
+The scan can pass material transition alerts to the existing `NotificationService` instead of maintaining a second channel implementation. This reuses the configured alert route, channel routing, Markdown handling, noise control, and per-channel delivery diagnostics already supported by the application.
+
+Real delivery is **explicit opt-in**. The normal scheduled command only writes alert candidates and does not send them. To allow real delivery for a manual or scheduled run, execute:
+
+```bash
+python scripts/run_us_research_scan.py --send-research-alerts
+```
+
+The dispatch adapter:
+
+- uses `route_type=alert` and preserves `critical` / `warning` / `info` severity;
+- passes the stock code to stock-aware email routing when available;
+- provides a stable per-run dedup key and a per-symbol/severity cooldown key to the existing notification noise layer;
+- sends at most five research alerts in one scan, ordered by severity and priority score;
+- contains notification failures so a broken channel never fails the research scan;
+- never adds entry prices, stops, targets, position sizes, or execution instructions to the message.
+
+A repeated execution of the same persisted `run_id` does not dispatch again because no new priority-event rows are inserted on the second pass.
+
 ## Persistence and outputs
 
 Each run persists one event snapshot per candidate in `research_priority_events`, keyed by market, symbol, and run ID. Re-running the same run is idempotent. Before persisting the current run, the scan reads the latest prior event for each symbol and evaluates the transition.
@@ -47,7 +68,10 @@ The daily US research scan emits:
 - `reports/screening/us_research_priority_events.md`
 - `reports/screening/us_research_priority_alerts.json`
 - `reports/screening/us_research_priority_alerts.md`
+- `reports/screening/us_research_priority_notifications.json`
+
+The notification diagnostics file records whether real dispatch was enabled, how many alerts were eligible, how many attempts were made, and per-channel success/failure diagnostics returned by the existing notification layer.
 
 The long-lived candidate-pool JSON includes the current `research_priority` sidecar and, when a material transition exists, a `research_alert` sidecar.
 
-The transition output is designed to feed the project's existing alert/notification stack in a later wiring step. This layer itself does not create entry prices, stops, targets, position sizes, or execution instructions.
+This layer only ranks research attention and reports research-state transitions. It does not create entry prices, stops, targets, position sizes, or execution instructions.
