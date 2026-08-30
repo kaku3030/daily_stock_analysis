@@ -16,6 +16,10 @@ from src.repositories.candidate_pool_repo import (
     candidate_to_dict,
 )
 from src.services.screening.config import Config
+from src.services.screening.industry_radar import (
+    build_industry_radar,
+    industry_radar_markdown,
+)
 from src.services.screening.pipeline import screen
 
 logger = logging.getLogger(__name__)
@@ -99,8 +103,20 @@ def _candidate_pool_markdown(candidates: list[dict]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _write_industry_radar(candidates: list[dict], output_dir: Path) -> None:
+    radar = build_industry_radar(candidates)
+    (output_dir / "us_research_industry_radar.json").write_text(
+        json.dumps(radar, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+    (output_dir / "us_research_industry_radar.md").write_text(
+        industry_radar_markdown(radar),
+        encoding="utf-8",
+    )
+
+
 def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
-    """Persist current picks and emit a long-lived candidate-pool snapshot."""
+    """Persist current picks and emit long-lived pool + industry snapshots."""
 
     try:
         repo = CandidatePoolRepository()
@@ -117,6 +133,7 @@ def _sync_candidate_pool(payload: dict, output_dir: Path) -> None:
             _candidate_pool_markdown(candidates),
             encoding="utf-8",
         )
+        _write_industry_radar(candidates, output_dir)
         logger.info(
             "Candidate pool synced: inserted=%d updated=%d aged=%d watching=%d retired=%d reactivated=%d",
             stats.inserted,
