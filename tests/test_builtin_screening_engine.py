@@ -57,9 +57,45 @@ def test_bundled_engine_keeps_source_and_license_notices() -> None:
 
     assert REFERENCE_REVISION in notice
     assert "Apache License" in license_text
+    derived_python_files = {
+        "__init__.py",
+        "candidate_context.py",
+        "config.py",
+        "context.py",
+        "daily.py",
+        "dsa.py",
+        "dsa_provider.py",
+        "filter.py",
+        "hotspot.py",
+        "industry.py",
+        "models.py",
+        "normalize.py",
+        "pipeline.py",
+        "post_analysis.py",
+        "ranker.py",
+        "risk.py",
+        "scorer.py",
+        "selection_variant.py",
+        "snapshot.py",
+        "snapshot_us.py",
+        "source_guard.py",
+        "strategy.py",
+    }
+    derived_strategy_files = {
+        "balanced_alpha.yaml",
+        "blue_chip_income.yaml",
+        "capital_heat.yaml",
+        "dual_low.yaml",
+        "low_volatility_quality.yaml",
+        "momentum_quality.yaml",
+        "oversold_reversal.yaml",
+        "quality_value.yaml",
+        "shrink_pullback.yaml",
+        "volume_breakout.yaml",
+    }
     derived_files = [
-        *SCREENING_ROOT.glob("*.py"),
-        *(SCREENING_ROOT / "strategies").glob("*.yaml"),
+        *(SCREENING_ROOT / name for name in sorted(derived_python_files)),
+        *(SCREENING_ROOT / "strategies" / name for name in sorted(derived_strategy_files)),
     ]
     assert derived_files
     for path in derived_files:
@@ -80,6 +116,7 @@ def test_bundled_strategies_are_loaded_from_the_internal_package() -> None:
         "oversold_reversal",
         "quality_value",
         "shrink_pullback",
+        "us_research_priority",
         "volume_breakout",
     }
     assert strategies["dual_low"].screening.factor_weights["value"] < 0.40

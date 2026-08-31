@@ -105,7 +105,7 @@ class AnalyzerNewsPromptTestCase(unittest.TestCase):
         self.assertNotIn("专注于趋势交易", prompt)
         self.assertNotIn("多头排列：MA5 > MA10 > MA20", prompt)
 
-    def test_analysis_prompt_keeps_injected_default_policy_for_implicit_default_run(self) -> None:
+    def test_analysis_prompt_uses_research_baseline_for_implicit_default_run(self) -> None:
         with patch.object(GeminiAnalyzer, "_init_litellm", return_value=None):
             analyzer = GeminiAnalyzer(
                 skill_instructions="### 技能 1: 默认多头趋势",
@@ -115,9 +115,10 @@ class AnalyzerNewsPromptTestCase(unittest.TestCase):
 
         prompt = analyzer._get_analysis_system_prompt("zh", stock_code="600519")
 
-        self.assertIn("专注于趋势交易", prompt)
-        self.assertIn("多头排列必须条件", prompt)
+        self.assertIn("选股研究仪表盘", prompt)
+        self.assertIn("默认研究筛选基线", prompt)
         self.assertIn("多头排列：MA5 > MA10 > MA20", prompt)
+        self.assertNotIn("多头排列必须条件", prompt)
 
     def test_analysis_prompt_requires_phase_decision_in_main_and_legacy_modes(self) -> None:
         for legacy in (False, True):
@@ -161,8 +162,11 @@ class AnalyzerNewsPromptTestCase(unittest.TestCase):
 
                 self.assertIn("### 减仓（20-39分）", prompt)
                 self.assertIn("### 卖出（0-19分）", prompt)
-                self.assertIn("20-39：减仓，`action=reduce`，`decision_type=sell`。", prompt)
-                self.assertIn("0-19：卖出，`action=sell`，`decision_type=sell`。", prompt)
+                self.assertIn("`operation_advice` 固定输出“观望”", prompt)
+                self.assertIn("`decision_type` 固定输出 `hold`", prompt)
+                self.assertIn("`action` 固定输出 `watch`", prompt)
+                self.assertNotIn("20-39：减仓，`action=reduce`，`decision_type=sell`。", prompt)
+                self.assertNotIn("0-19：卖出，`action=sell`，`decision_type=sell`。", prompt)
                 self.assertNotIn("### 卖出/减仓（0-39分）", prompt)
 
     def test_prompt_contains_time_constraints(self) -> None:
