@@ -181,6 +181,10 @@ def screen(
         valuation_coverage_note = _us_valuation_coverage_note(snapshot_df)
         degradation.append(valuation_coverage_note)
         logger.info(valuation_coverage_note)
+        valuation_source_note = _us_valuation_source_note(snapshot_df)
+        if valuation_source_note:
+            degradation.append(valuation_source_note)
+            logger.info(valuation_source_note)
     if universe_metadata["universe_errors"]:
         degradation.extend(
             f"US universe fallback: {item}"
@@ -721,6 +725,30 @@ def _us_valuation_coverage_note(snapshot_df: pd.DataFrame) -> str:
         ratio = available / total * 100.0 if total else 0.0
         parts.append(f"{field}={available}/{total} ({ratio:.1f}%)")
     return "US snapshot valuation coverage: " + ", ".join(parts)
+
+
+def _us_valuation_source_note(snapshot_df: pd.DataFrame) -> str:
+    sources = snapshot_df.attrs.get("valuation_sources")
+    if not isinstance(sources, dict):
+        return ""
+    parts: list[str] = []
+    for field in ("pe_ratio", "pb_ratio"):
+        counts = sources.get(field)
+        if not isinstance(counts, dict):
+            continue
+        parts.append(
+            f"{field}=live {int(counts.get('live', 0) or 0)}, "
+            f"cached {int(counts.get('cached', 0) or 0)}, "
+            f"missing {int(counts.get('missing', 0) or 0)}"
+        )
+    if not parts:
+        return ""
+    request_errors = int(sources.get("request_errors", 0) or 0)
+    return (
+        "US snapshot valuation sources: "
+        + "; ".join(parts)
+        + f"; request_errors={request_errors}"
+    )
 
 
 def _event_source_weights(event_profile: dict[str, object]) -> dict[str, float] | None:

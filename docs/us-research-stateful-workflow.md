@@ -11,6 +11,7 @@ last known complete US index universe:
 - `data/stock_analysis.db-wal`
 - `data/stock_analysis.db-shm`
 - `data/us_universe.last_good.json`
+- `data/us_valuation.last_good.json`
 
 It deliberately does **not** cache the entire `data/` directory, so unrelated
 provider caches and temporary market-data files do not become part of the
@@ -112,6 +113,12 @@ ticker count, successful snapshot count, and snapshot coverage ratio. The
 report diagnostics also expose PE/PB field coverage. Missing valuation data is
 scored conservatively and remains visible as degraded coverage; it is not
 treated as evidence that every stock failed the valuation thresholds.
+
+Live PE/PB values update a last-known-good cache with separate timestamps for
+each field. When yfinance omits a value, the scan may reuse a cached value no
+older than seven days. Diagnostics distinguish `live`, `cached`, and `missing`
+counts; expired or malformed entries remain missing instead of appearing as
+current data.
 
 When the screening model resolves to Gemini and `LITELLM_FALLBACK_MODELS` is
 empty, the screening ranker inherits `GEMINI_MODEL_FALLBACK`. An explicit
