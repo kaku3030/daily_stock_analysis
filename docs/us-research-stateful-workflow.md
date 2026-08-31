@@ -109,7 +109,15 @@ state cache and can be reused during a temporary constituent-source outage.
 
 Every report exposes the requested universe source, resolved source, planned
 ticker count, successful snapshot count, and snapshot coverage ratio. The
-default publication requirements are:
+report diagnostics also expose PE/PB field coverage. Missing valuation data is
+scored conservatively and remains visible as degraded coverage; it is not
+treated as evidence that every stock failed the valuation thresholds.
+
+When the screening model resolves to Gemini and `LITELLM_FALLBACK_MODELS` is
+empty, the screening ranker inherits `GEMINI_MODEL_FALLBACK`. An explicit
+`LITELLM_FALLBACK_MODELS` value still takes precedence.
+
+The default publication requirements are:
 
 ```text
 US_RESEARCH_REQUIRED_UNIVERSE_SOURCE=sp500_nasdaq100
@@ -130,3 +138,4 @@ complete market ranking.
 GitHub Actions cache is operational state, not a permanent backup system. Scheduled weekday runs continuously refresh the cache, including around normal weekends and market holidays. If Actions are disabled for a long period or GitHub evicts the cache, the workflow safely starts a fresh research history.
 
 Research reports remain separate Actions artifacts; the SQLite database is not uploaded with public report artifacts.
+

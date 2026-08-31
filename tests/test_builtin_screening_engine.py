@@ -159,6 +159,23 @@ def test_screening_config_reads_snapshot_cache_ttl() -> None:
     assert config.snapshot_cache_ttl_seconds == 120.0
 
 
+def test_screening_config_inherits_gemini_fallback_model() -> None:
+    with patch.dict(
+        os.environ,
+        {
+            "GEMINI_API_KEY": "test-key",
+            "GEMINI_MODEL": "gemini-3-flash-preview",
+            "GEMINI_MODEL_FALLBACK": "gemini-3.6-flash",
+            "LITELLM_FALLBACK_MODELS": "",
+        },
+        clear=True,
+    ):
+        config = ScreeningRuntimeConfig.from_env()
+
+    assert config.llm_model == "gemini/gemini-3-flash-preview"
+    assert config.llm_fallback_models == ["gemini/gemini-3.6-flash"]
+
+
 def test_pipeline_passes_daily_history_cache_settings_to_enrichment(monkeypatch) -> None:
     snapshot_df = pd.DataFrame(
         [
@@ -852,3 +869,4 @@ def test_fresh_snapshot_cache_reuses_fallback_from_same_source_chain(tmp_path, m
     assert second.attrs["snapshot_source"] == "last_good_cache"
     assert second.attrs["last_good_snapshot_source"] == "sina"
     assert second.attrs["fallback_used"] is False
+

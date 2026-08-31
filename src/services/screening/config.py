@@ -285,7 +285,7 @@ class Config:
             llm_model=llm_model,
             llm_base_url=_resolve_llm_base_url(llm_model),
             llm_config_path=_parse_optional_path_env("LITELLM_CONFIG"),
-            llm_fallback_models=_parse_csv_env("LITELLM_FALLBACK_MODELS", []),
+            llm_fallback_models=_resolve_llm_fallback_models(llm_model),
             llm_channels=channels,
             llm_context=os.getenv("LLM_CONTEXT", ""),
             llm_candidate_context_enabled=_parse_bool_env("LLM_CANDIDATE_CONTEXT_ENABLED", False),
@@ -496,6 +496,20 @@ def _resolve_llm_model(channels: list[dict[str, object]]) -> str:
     return DEFAULT_LLM_MODEL
 
 
+def _resolve_llm_fallback_models(llm_model: str) -> list[str]:
+    configured = os.getenv("LITELLM_FALLBACK_MODELS", "").strip()
+    if configured:
+        return _parse_csv_env("LITELLM_FALLBACK_MODELS", [])
+    if not llm_model.startswith("gemini/"):
+        return []
+
+    fallback = os.getenv("GEMINI_MODEL_FALLBACK", "").strip()
+    if not fallback:
+        return []
+    normalized = _normalize_litellm_model(fallback, "gemini")
+    return [] if normalized == llm_model else [normalized]
+
+
 def _normalize_litellm_model(model: str, protocol: str = "openai") -> str:
     model = model.strip()
     if "/" in model:
@@ -538,3 +552,4 @@ def _resolve_llm_base_url(model: str) -> str:
     if model.startswith("openai/"):
         return os.getenv("OPENAI_BASE_URL", "")
     return os.getenv("OPENAI_BASE_URL", "")
+

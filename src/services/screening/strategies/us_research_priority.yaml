@@ -20,10 +20,6 @@ screening:
     exclude_st: false
     amount_min: 20000000
     market_cap_min: 2000000000
-    pe_ttm_min: 0
-    pe_ttm_max: 120
-    pb_min: 0
-    pb_max: 40
     change_pct_min: -8
     change_pct_max: 10
     price_min: 3
@@ -72,3 +68,4 @@ screening:
     对新闻不足、行业过度集中、财报临近或数据不完整的候选降低置信度。
     输出中明确核心研究假设、最重要风险、后续验证项和逻辑失效条件。
   max_output: 10
+

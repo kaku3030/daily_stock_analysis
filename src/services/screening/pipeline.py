@@ -177,6 +177,10 @@ def screen(
     snapshot_source = str(snapshot_df.attrs.get("snapshot_source", ""))
     source_errors = [str(item) for item in snapshot_df.attrs.get("source_errors", [])]
     universe_metadata = _universe_metadata(snapshot_df)
+    if market == "us":
+        valuation_coverage_note = _us_valuation_coverage_note(snapshot_df)
+        degradation.append(valuation_coverage_note)
+        logger.info(valuation_coverage_note)
     if universe_metadata["universe_errors"]:
         degradation.extend(
             f"US universe fallback: {item}"
@@ -706,6 +710,19 @@ def _universe_metadata(snapshot_df: pd.DataFrame) -> dict[str, object]:
     }
 
 
+def _us_valuation_coverage_note(snapshot_df: pd.DataFrame) -> str:
+    total = len(snapshot_df)
+    parts: list[str] = []
+    for field in ("pe_ratio", "pb_ratio"):
+        if field in snapshot_df.columns:
+            available = int(pd.to_numeric(snapshot_df[field], errors="coerce").notna().sum())
+        else:
+            available = 0
+        ratio = available / total * 100.0 if total else 0.0
+        parts.append(f"{field}={available}/{total} ({ratio:.1f}%)")
+    return "US snapshot valuation coverage: " + ", ".join(parts)
+
+
 def _event_source_weights(event_profile: dict[str, object]) -> dict[str, float] | None:
     value = (event_profile or {}).get("source_weights")
     if not isinstance(value, dict):
@@ -790,3 +807,4 @@ def _format_filter_waterfall(steps: list[dict[str, object]], *, limit: int = 8) 
 
 def _safe_text(v: object) -> str:
     return safe_text(v, max_len=120)
+
