@@ -20,10 +20,6 @@ screening:
     exclude_st: false
     amount_min: 20000000
     market_cap_min: 2000000000
-    pe_ttm_min: 0
-    pe_ttm_max: 120
-    pb_min: 0
-    pb_max: 40
     change_pct_min: -8
     change_pct_max: 10
     price_min: 3

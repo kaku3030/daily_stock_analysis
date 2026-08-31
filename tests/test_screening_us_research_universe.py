@@ -1,8 +1,10 @@
 import json
+import logging
 
 import pandas as pd
 
 from src.services.screening import snapshot_us
+from src.services.screening import pipeline as screening_pipeline
 from src.services.screening.config import Config
 from src.services.screening.strategy import load_all_strategies
 
@@ -94,3 +96,72 @@ def test_us_research_strategy_declares_us_scope() -> None:
     strategy = strategies["us_research_priority"]
     assert strategy.screening.market_scope == ["us"]
     assert strategy.screening.max_output == 10
+    assert strategy.screening.hard_filters.pe_ttm_min is None
+    assert strategy.screening.hard_filters.pe_ttm_max is None
+    assert strategy.screening.hard_filters.pb_min is None
+    assert strategy.screening.hard_filters.pb_max is None
+
+
+def test_us_research_keeps_candidates_when_valuation_is_unavailable(monkeypatch, caplog) -> None:
+    snapshot = pd.DataFrame([
+        {
+            "code": "AAPL",
+            "name": "Apple",
+            "price": 200.0,
+            "change_pct": 1.0,
+            "amount": 500_000_000.0,
+            "total_mv": 3_000_000_000_000.0,
+            "pe_ratio": None,
+            "pb_ratio": None,
+            "volume_ratio": 1.2,
+            "turnover_rate": 0.5,
+        },
+        {
+            "code": "MSFT",
+            "name": "Microsoft",
+            "price": 400.0,
+            "change_pct": 0.5,
+            "amount": 400_000_000.0,
+            "total_mv": 2_500_000_000_000.0,
+            "pe_ratio": None,
+            "pb_ratio": None,
+            "volume_ratio": 1.1,
+            "turnover_rate": 0.4,
+        },
+    ])
+    snapshot.attrs.update({
+        "snapshot_source": "yfinance",
+        "source_errors": [],
+        "fallback_used": False,
+        "universe_requested_source": "sp500_nasdaq100",
+        "universe_source": "sp500_nasdaq100",
+        "universe_count": 2,
+        "universe_snapshot_count": 2,
+        "universe_coverage_ratio": 1.0,
+        "universe_fallback_used": False,
+        "universe_errors": [],
+    })
+    monkeypatch.setattr(
+        screening_pipeline,
+        "fetch_snapshot_with_fallback",
+        lambda *args, **kwargs: snapshot.copy(),
+    )
+
+    with caplog.at_level(logging.INFO, logger="src.services.screening.pipeline"):
+        result = screening_pipeline.screen(
+            "us_research_priority",
+            market="us",
+            max_output=2,
+            use_llm=False,
+            config=Config(
+                post_analyzers=[],
+                risk_enabled=False,
+                portfolio_diversity_enabled=False,
+                daily_enrich_enabled=False,
+            ),
+        )
+
+    assert result.after_filter_count == 2
+    assert [pick.code for pick in result.picks] == ["AAPL", "MSFT"]
+    assert "US snapshot valuation coverage: pe_ratio=0/2 (0.0%), pb_ratio=0/2 (0.0%)" in result.degradation
+    assert "US snapshot valuation coverage: pe_ratio=0/2 (0.0%), pb_ratio=0/2 (0.0%)" in caplog.text

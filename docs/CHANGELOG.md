@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [修复] 美股研究扫描不再把缺失 PE/PB 误判为估值不合格并清空候选；报告新增估值字段覆盖率诊断，筛选服务在未配置 LiteLLM 备用列表时继承 Gemini 备用模型。
 - [修复] 美股研究扫描为 `S&P 500 + Nasdaq 100` 股票池增加带来源和时效校验的持久缓存、覆盖率诊断与发布门控；来源降级、股票池少于 400 只或有效快照低于 80% 时不再发布候选、更新历史或发送 Telegram 提醒。
 - [新功能] 美股研究扫描结果持久化为长期候选池，记录 A/B/C/D 研究等级、入选历史、研究上下文与 active/watching/retired 生命周期。
 - [新功能] 美股研究扫描新增行业研究雷达，聚合候选质量、持续入选与可用 industry/board heat 数据，并在市场层数据缺失时退化为 candidate_only。
