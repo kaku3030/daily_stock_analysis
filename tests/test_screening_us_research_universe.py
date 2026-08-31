@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
@@ -91,6 +92,85 @@ def test_auto_universe_uses_recent_matching_cache_before_smaller_fallback(
     assert resolution.fallback_used is True
 
 
+def test_valuation_enrichment_uses_recent_cache_and_reports_expired_missing(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    cache_path = tmp_path / "valuation.json"
+    monkeypatch.setattr(snapshot_us, "_valuation_cache_path", lambda: cache_path)
+    cache_path.write_text(json.dumps({
+        "version": 1,
+        "entries": {
+            "AAPL": {
+                "pe_ratio": {
+                    "value": 31.5,
+                    "captured_at": datetime.now(timezone.utc).isoformat(),
+                },
+                "pb_ratio": {
+                    "value": 8.0,
+                    "captured_at": (
+                        datetime.now(timezone.utc) - timedelta(days=8)
+                    ).isoformat(),
+                },
+            },
+        },
+    }), encoding="utf-8")
+
+    class FailingTicker:
+        @property
+        def info(self):
+            raise RuntimeError("rate limited")
+
+    monkeypatch.setattr("yfinance.Ticker", lambda _: FailingTicker())
+    frame = pd.DataFrame([{
+        "code": "AAPL",
+        "name": "AAPL",
+        "pe_ratio": None,
+        "pb_ratio": None,
+        "industry": "",
+    }])
+
+    stats = snapshot_us._enrich_info_fields(frame)
+
+    assert frame.at[0, "pe_ratio"] == 31.5
+    assert pd.isna(frame.at[0, "pb_ratio"])
+    assert stats == {
+        "pe_ratio": {"live": 0, "cached": 1, "missing": 0},
+        "pb_ratio": {"live": 0, "cached": 0, "missing": 1},
+        "request_errors": 1,
+    }
+
+
+def test_valuation_enrichment_persists_live_values(monkeypatch, tmp_path) -> None:
+    cache_path = tmp_path / "valuation.json"
+    monkeypatch.setattr(snapshot_us, "_valuation_cache_path", lambda: cache_path)
+
+    class LiveTicker:
+        info = {
+            "trailingPE": 25.0,
+            "priceToBook": 6.0,
+            "industry": "Technology",
+            "shortName": "Apple",
+        }
+
+    monkeypatch.setattr("yfinance.Ticker", lambda _: LiveTicker())
+    frame = pd.DataFrame([{
+        "code": "AAPL",
+        "name": "AAPL",
+        "pe_ratio": None,
+        "pb_ratio": None,
+        "industry": "",
+    }])
+
+    stats = snapshot_us._enrich_info_fields(frame)
+    payload = json.loads(cache_path.read_text(encoding="utf-8"))
+
+    assert stats["pe_ratio"] == {"live": 1, "cached": 0, "missing": 0}
+    assert stats["pb_ratio"] == {"live": 1, "cached": 0, "missing": 0}
+    assert payload["entries"]["AAPL"]["pe_ratio"]["value"] == 25.0
+    assert payload["entries"]["AAPL"]["pb_ratio"]["value"] == 6.0
+
+
 def test_us_research_strategy_declares_us_scope() -> None:
     strategies = load_all_strategies(Config().strategies_dir)
     strategy = strategies["us_research_priority"]
@@ -140,6 +220,11 @@ def test_us_research_keeps_candidates_when_valuation_is_unavailable(monkeypatch,
         "universe_coverage_ratio": 1.0,
         "universe_fallback_used": False,
         "universe_errors": [],
+        "valuation_sources": {
+            "pe_ratio": {"live": 0, "cached": 0, "missing": 2},
+            "pb_ratio": {"live": 0, "cached": 0, "missing": 2},
+            "request_errors": 2,
+        },
     })
     monkeypatch.setattr(
         screening_pipeline,
@@ -165,3 +250,9 @@ def test_us_research_keeps_candidates_when_valuation_is_unavailable(monkeypatch,
     assert [pick.code for pick in result.picks] == ["AAPL", "MSFT"]
     assert "US snapshot valuation coverage: pe_ratio=0/2 (0.0%), pb_ratio=0/2 (0.0%)" in result.degradation
     assert "US snapshot valuation coverage: pe_ratio=0/2 (0.0%), pb_ratio=0/2 (0.0%)" in caplog.text
+    source_note = (
+        "US snapshot valuation sources: pe_ratio=live 0, cached 0, missing 2; "
+        "pb_ratio=live 0, cached 0, missing 2; request_errors=2"
+    )
+    assert source_note in result.degradation
+    assert source_note in caplog.text

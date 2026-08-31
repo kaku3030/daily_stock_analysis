@@ -152,6 +152,7 @@ jobs:
             data/stock_analysis.db-wal
             data/stock_analysis.db-shm
             data/us_universe.last_good.json
+            data/us_valuation.last_good.json
           key: us-research-state-v1-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             us-research-state-v1-${{ runner.os }}-
@@ -341,6 +342,7 @@ jobs:
             data/stock_analysis.db-wal
             data/stock_analysis.db-shm
             data/us_universe.last_good.json
+            data/us_valuation.last_good.json
           key: us-research-state-v1-${{ runner.os }}-${{ github.run_id }}
 
       - name: Upload research reports

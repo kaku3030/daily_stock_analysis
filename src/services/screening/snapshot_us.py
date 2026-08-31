@@ -14,6 +14,7 @@ rather than silently screening the US pool.
 import logging
 import os
 import json
+import math
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -36,6 +37,8 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _UNIVERSE_CACHE_VERSION = 1
 _UNIVERSE_HTTP_TIMEOUT_SECONDS = 20.0
 _UNIVERSE_CACHE_MAX_AGE_HOURS = 24 * 7
+_VALUATION_CACHE_VERSION = 1
+_VALUATION_CACHE_MAX_AGE_HOURS = 24 * 7
 
 _DEFAULT_US_UNIVERSE = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "BRK-B",
@@ -423,7 +426,7 @@ def fetch_us_snapshot(
     df = df.dropna(subset=["price"])
     df = df[df["price"] > 0]
 
-    _enrich_info_fields(df)
+    valuation_sources = _enrich_info_fields(df)
 
     df.attrs["snapshot_source"] = "yfinance"
     df.attrs["universe_requested_source"] = resolution.requested_source
@@ -433,20 +436,25 @@ def fetch_us_snapshot(
     df.attrs["universe_coverage_ratio"] = round(len(df) / len(tickers), 6) if tickers else 0.0
     df.attrs["universe_fallback_used"] = resolution.fallback_used
     df.attrs["universe_errors"] = list(resolution.errors)
+    df.attrs["valuation_sources"] = valuation_sources
     logger.info("US snapshot: %d rows from yfinance", len(df))
     return df
 
 
-def _enrich_info_fields(df: pd.DataFrame) -> None:
-    """Best-effort enrichment of pe_ratio, pb_ratio, industry from yfinance info."""
+def _enrich_info_fields(df: pd.DataFrame) -> dict[str, object]:
+    """Best-effort live enrichment with a bounded last-known-good valuation fallback."""
     import yfinance as yf
 
     needs_pe = df["pe_ratio"].isna().sum() > len(df) * 0.5
     if not needs_pe:
-        return
+        return _valuation_source_counts(df, live_fields={})
+
+    cache = _read_valuation_cache()
+    live_fields: dict[str, set[str]] = {"pe_ratio": set(), "pb_ratio": set()}
+    request_errors = 0
 
     for idx in df.index:
-        ticker = df.at[idx, "code"]
+        ticker = str(df.at[idx, "code"] or "").strip().upper()
         try:
             info = yf.Ticker(ticker).info
             if pd.isna(df.at[idx, "pe_ratio"]) or df.at[idx, "pe_ratio"] == 0:
@@ -457,8 +465,116 @@ def _enrich_info_fields(df: pd.DataFrame) -> None:
                 df.at[idx, "industry"] = info.get("industry", "")
             if not df.at[idx, "name"] or df.at[idx, "name"] == ticker:
                 df.at[idx, "name"] = info.get("shortName", ticker)
-        except Exception:
+        except Exception as exc:
+            request_errors += 1
+            logger.debug("US valuation enrichment failed for %s: %s", ticker, exc)
+
+        entry = cache.get(ticker)
+        if not isinstance(entry, dict):
+            entry = {}
+            cache[ticker] = entry
+        for field in ("pe_ratio", "pb_ratio"):
+            value = _finite_number(df.at[idx, field])
+            if value is not None:
+                df.at[idx, field] = value
+                live_fields[field].add(ticker)
+                entry[field] = {
+                    "value": value,
+                    "captured_at": datetime.now(timezone.utc).isoformat(),
+                }
+                continue
+            cached_value = _cached_valuation(entry.get(field))
+            if cached_value is not None:
+                df.at[idx, field] = cached_value
+
+    _write_valuation_cache(cache)
+    stats = _valuation_source_counts(df, live_fields=live_fields)
+    stats["request_errors"] = request_errors
+    logger.info(
+        "US valuation enrichment: pe_ratio live=%d cached=%d missing=%d; "
+        "pb_ratio live=%d cached=%d missing=%d; request_errors=%d",
+        stats["pe_ratio"]["live"],
+        stats["pe_ratio"]["cached"],
+        stats["pe_ratio"]["missing"],
+        stats["pb_ratio"]["live"],
+        stats["pb_ratio"]["cached"],
+        stats["pb_ratio"]["missing"],
+        request_errors,
+    )
+    return stats
+
+
+def _valuation_cache_path() -> Path:
+    return _PROJECT_ROOT / "data" / "us_valuation.last_good.json"
+
+
+def _read_valuation_cache() -> dict[str, dict]:
+    try:
+        payload = json.loads(_valuation_cache_path().read_text(encoding="utf-8"))
+        if payload.get("version") != _VALUATION_CACHE_VERSION:
+            return {}
+        entries = payload.get("entries")
+        return entries if isinstance(entries, dict) else {}
+    except (FileNotFoundError, TypeError, ValueError, json.JSONDecodeError):
+        return {}
+
+
+def _write_valuation_cache(entries: dict[str, dict]) -> None:
+    path = _valuation_cache_path()
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"version": _VALUATION_CACHE_VERSION, "entries": entries}
+        temp_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        temp_path.replace(path)
+    except Exception as exc:
+        logger.warning("Could not persist US valuation cache %s: %s", path, exc)
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
             pass
+
+
+def _cached_valuation(value: object) -> float | None:
+    if not isinstance(value, dict):
+        return None
+    number = _finite_number(value.get("value"))
+    if number is None:
+        return None
+    try:
+        captured_at = datetime.fromisoformat(str(value["captured_at"]).replace("Z", "+00:00"))
+        age_hours = (
+            datetime.now(timezone.utc) - captured_at.astimezone(timezone.utc)
+        ).total_seconds() / 3600
+    except (KeyError, TypeError, ValueError):
+        return None
+    return number if 0 <= age_hours <= _VALUATION_CACHE_MAX_AGE_HOURS else None
+
+
+def _valuation_source_counts(
+    df: pd.DataFrame,
+    *,
+    live_fields: dict[str, set[str]],
+) -> dict[str, object]:
+    result: dict[str, object] = {}
+    codes = df["code"].astype(str).str.upper()
+    for field in ("pe_ratio", "pb_ratio"):
+        available = pd.to_numeric(df[field], errors="coerce").notna()
+        live = codes.isin(live_fields.get(field, set())) & available
+        result[field] = {
+            "live": int(live.sum()),
+            "cached": int((available & ~live).sum()),
+            "missing": int((~available).sum()),
+        }
+    return result
+
+
+def _finite_number(value: object) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
 
 
 def fetch_daily_history_yfinance(
