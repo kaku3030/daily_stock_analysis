@@ -869,4 +869,3 @@ def test_fresh_snapshot_cache_reuses_fallback_from_same_source_chain(tmp_path, m
     assert second.attrs["snapshot_source"] == "last_good_cache"
     assert second.attrs["last_good_snapshot_source"] == "sina"
     assert second.attrs["fallback_used"] is False
-

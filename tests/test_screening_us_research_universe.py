@@ -165,4 +165,3 @@ def test_us_research_keeps_candidates_when_valuation_is_unavailable(monkeypatch,
     assert [pick.code for pick in result.picks] == ["AAPL", "MSFT"]
     assert "US snapshot valuation coverage: pe_ratio=0/2 (0.0%), pb_ratio=0/2 (0.0%)" in result.degradation
     assert "US snapshot valuation coverage: pe_ratio=0/2 (0.0%), pb_ratio=0/2 (0.0%)" in caplog.text
-

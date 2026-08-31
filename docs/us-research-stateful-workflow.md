@@ -138,4 +138,3 @@ complete market ranking.
 GitHub Actions cache is operational state, not a permanent backup system. Scheduled weekday runs continuously refresh the cache, including around normal weekends and market holidays. If Actions are disabled for a long period or GitHub evicts the cache, the workflow safely starts a fresh research history.
 
 Research reports remain separate Actions artifacts; the SQLite database is not uploaded with public report artifacts.
-

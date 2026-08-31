@@ -807,4 +807,3 @@ def _format_filter_waterfall(steps: list[dict[str, object]], *, limit: int = 8) 
 
 def _safe_text(v: object) -> str:
     return safe_text(v, max_len=120)
-

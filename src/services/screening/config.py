@@ -552,4 +552,3 @@ def _resolve_llm_base_url(model: str) -> str:
     if model.startswith("openai/"):
         return os.getenv("OPENAI_BASE_URL", "")
     return os.getenv("OPENAI_BASE_URL", "")
-
