@@ -223,6 +223,13 @@ class ScreenResult:
     degradation: list[str] = field(default_factory=list)
     snapshot_source: str = ""
     source_errors: list[str] = field(default_factory=list)
+    universe_requested_source: str = ""
+    universe_source: str = ""
+    universe_count: int = 0
+    universe_snapshot_count: int = 0
+    universe_coverage_ratio: float | None = None
+    universe_fallback_used: bool = False
+    universe_errors: list[str] = field(default_factory=list)
     deep_analysis_requested: bool = False
     post_analyzers: list[str] = field(default_factory=list)
     daily_enriched: bool = False

@@ -60,14 +60,21 @@ def _research_alert_dispatch_enabled() -> bool:
 
 
 def _markdown(payload: dict) -> str:
+    coverage = payload.get("universe_coverage_ratio")
+    coverage_text = f"{float(coverage) * 100:.1f}%" if coverage is not None else "未知"
     lines = [
         "# 美股每日研究候选",
         "",
         "> 用于确定进一步研究优先级，不构成交易建议。",
         "",
         f"- 策略：{payload.get('strategy', 'us_research_priority')}",
-        f"- 初始股票数：{payload.get('snapshot_count', 0)}",
+        f"- 目标股票池：{payload.get('universe_requested_source') or '未记录'}",
+        f"- 实际股票池来源：{payload.get('universe_source') or '未记录'}",
+        f"- 计划扫描数：{payload.get('universe_count', 0)}",
+        f"- 成功快照数：{payload.get('universe_snapshot_count', payload.get('snapshot_count', 0))}",
+        f"- 股票池覆盖率：{coverage_text}",
         f"- 筛选后数量：{payload.get('after_filter_count', 0)}",
+        f"- 发布状态：{payload.get('publication_status', 'published')}",
         "",
         "| 排名 | 股票 | 研究分 | 行业 | 核心理由 | 主要风险 |",
         "|---:|---|---:|---|---|---|",
@@ -79,10 +86,61 @@ def _markdown(payload: dict) -> str:
             f"| {pick.get('rank', '')} | {pick.get('code', '')} {pick.get('name', '')} | "
             f"{float(pick.get('final_score') or 0):.1f} | {pick.get('industry', '')} | {reason} | {risk} |"
         )
+    if not payload.get("picks") and payload.get("publication_status") != "published":
+        lines.extend(["", "本轮因股票池覆盖率保护而未发布研究候选。"])
     degradations = payload.get("degradation") or []
     if degradations:
         lines.extend(["", "## 数据限制", "", *[f"- {item}" for item in degradations]])
     return "\n".join(lines) + "\n"
+
+
+def _apply_universe_publication_guard(payload: dict) -> bool:
+    """Suppress publication and state mutation when the US universe is incomplete."""
+    required_source = os.getenv(
+        "US_RESEARCH_REQUIRED_UNIVERSE_SOURCE",
+        "sp500_nasdaq100",
+    ).strip().lower()
+    min_count = max(1, int(os.getenv("US_RESEARCH_MIN_UNIVERSE_SIZE", "400")))
+    min_coverage = min(
+        1.0,
+        max(0.0, float(os.getenv("US_RESEARCH_MIN_UNIVERSE_COVERAGE", "0.80"))),
+    )
+    requested_source = str(payload.get("universe_requested_source") or "").strip().lower()
+    resolved_source = str(payload.get("universe_source") or "").strip().lower()
+    universe_count = int(payload.get("universe_count") or 0)
+    coverage = payload.get("universe_coverage_ratio")
+    coverage_value = float(coverage) if coverage is not None else 0.0
+    accepted_sources = {required_source, f"cache:{required_source}"}
+
+    reasons: list[str] = []
+    if requested_source != required_source:
+        reasons.append(
+            f"requested_source={requested_source or '<missing>'} expected={required_source}"
+        )
+    if resolved_source not in accepted_sources:
+        reasons.append(
+            f"resolved_source={resolved_source or '<missing>'} expected={required_source}"
+        )
+    if universe_count < min_count:
+        reasons.append(f"universe_count={universe_count} minimum={min_count}")
+    if coverage_value < min_coverage:
+        reasons.append(
+            f"coverage={coverage_value:.3f} minimum={min_coverage:.3f}"
+        )
+
+    if not reasons:
+        payload["publication_status"] = "published"
+        payload["publication_block_reasons"] = []
+        return True
+
+    payload["suppressed_candidate_count"] = len(payload.get("picks") or [])
+    payload["picks"] = []
+    payload["publication_status"] = "blocked_low_universe_coverage"
+    payload["publication_block_reasons"] = reasons
+    payload.setdefault("degradation", []).append(
+        "US research publication blocked: " + "; ".join(reasons)
+    )
+    return False
 
 
 def _candidate_pool_markdown(candidates: list[dict]) -> str:
@@ -298,12 +356,19 @@ def main() -> int:
         config=config,
     )
     payload = asdict(result)
+    publishable = _apply_universe_publication_guard(payload)
     (output_dir / "us_research_candidates.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
     )
     (output_dir / "us_research_candidates.md").write_text(_markdown(payload), encoding="utf-8")
-    _sync_candidate_pool(payload, output_dir)
+    if publishable:
+        _sync_candidate_pool(payload, output_dir)
+    else:
+        logger.warning(
+            "US research candidates suppressed; candidate history and alerts were not updated: %s",
+            "; ".join(payload.get("publication_block_reasons") or []),
+        )
     logger.info("US research scan completed with %d candidates", len(payload.get("picks", [])))
     return 0
 
