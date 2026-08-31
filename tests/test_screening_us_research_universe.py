@@ -256,3 +256,41 @@ def test_us_research_keeps_candidates_when_valuation_is_unavailable(monkeypatch,
     )
     assert source_note in result.degradation
     assert source_note in caplog.text
+    assert result.valuation_health == {
+        "status": "critical",
+        "confidence": "low",
+        "effective_coverage_ratio": 0.0,
+        "live_coverage_ratio": 0.0,
+        "request_error_ratio": 1.0,
+        "request_errors": 2,
+    }
+
+
+def test_us_valuation_health_distinguishes_cached_resilience_from_live_failure() -> None:
+    frame = pd.DataFrame({"code": [f"T{index}" for index in range(10)]})
+    frame.attrs["valuation_sources"] = {
+        "pe_ratio": {"live": 1, "cached": 7, "missing": 2},
+        "pb_ratio": {"live": 1, "cached": 7, "missing": 2},
+        "request_errors": 9,
+    }
+
+    health = screening_pipeline._us_valuation_health(frame)
+
+    assert health["status"] == "critical"
+    assert health["confidence"] == "low"
+    assert health["effective_coverage_ratio"] == 0.8
+    assert health["live_coverage_ratio"] == 0.1
+
+    frame.attrs["valuation_sources"] = {
+        "pe_ratio": {"live": 8, "cached": 1, "missing": 1},
+        "pb_ratio": {"live": 8, "cached": 1, "missing": 1},
+        "request_errors": 1,
+    }
+    assert screening_pipeline._us_valuation_health(frame)["confidence"] == "medium"
+
+    frame.attrs["valuation_sources"] = {
+        "pe_ratio": {"live": 10, "cached": 0, "missing": 0},
+        "pb_ratio": {"live": 10, "cached": 0, "missing": 0},
+        "request_errors": 0,
+    }
+    assert screening_pipeline._us_valuation_health(frame)["confidence"] == "high"

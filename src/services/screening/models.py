@@ -230,6 +230,7 @@ class ScreenResult:
     universe_coverage_ratio: float | None = None
     universe_fallback_used: bool = False
     universe_errors: list[str] = field(default_factory=list)
+    valuation_health: dict[str, Any] = field(default_factory=dict)
     deep_analysis_requested: bool = False
     post_analyzers: list[str] = field(default_factory=list)
     daily_enriched: bool = False

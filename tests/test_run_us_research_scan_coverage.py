@@ -13,9 +13,24 @@ def _payload(**overrides) -> dict:
         "universe_coverage_ratio": 500 / 520,
         "picks": [{"code": "AAPL"}],
         "degradation": [],
+        "valuation_health": {
+            "status": "degraded",
+            "confidence": "medium",
+            "effective_coverage_ratio": 0.8,
+            "live_coverage_ratio": 0.1,
+            "request_errors": 400,
+        },
     }
     payload.update(overrides)
     return payload
+
+
+def test_markdown_surfaces_valuation_confidence_without_trade_language() -> None:
+    markdown = run_us_research_scan._markdown(_payload())
+
+    assert "估值数据可信度：中" in markdown
+    assert "估值有效覆盖率：80.0%（实时最低覆盖 10.0%）" in markdown
+    assert "不构成交易建议" in markdown
 
 
 def test_publication_guard_accepts_complete_combined_universe(monkeypatch) -> None:
