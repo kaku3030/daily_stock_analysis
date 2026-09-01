@@ -10,6 +10,7 @@ from .config import StockRadarConfig, load_stock_radar_config
 from .health import FailureKind, FallbackStateMachine, ProviderMode
 from .notifications import RadarNotification, RadarNotifier, notify
 from .router import DebouncedMarketDataRouter
+from .runtime_notifications import NotificationServiceRadarSink
 from .validation import DailyQA, ValidationQueue, WeeklyCalibration
 
 __all__ = [
@@ -18,6 +19,7 @@ __all__ = [
     "FailureKind",
     "FallbackStateMachine",
     "PortfolioRiskAssessment",
+    "NotificationServiceRadarSink",
     "ProviderMode",
     "RadarNotification",
     "RadarNotifier",

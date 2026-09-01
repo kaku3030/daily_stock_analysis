@@ -268,6 +268,9 @@ jobs:
           NOTIFICATION_DEDUP_TTL_SECONDS: ${{ vars.NOTIFICATION_DEDUP_TTL_SECONDS || secrets.NOTIFICATION_DEDUP_TTL_SECONDS || '86400' }}
           NOTIFICATION_COOLDOWN_SECONDS: ${{ vars.NOTIFICATION_COOLDOWN_SECONDS || secrets.NOTIFICATION_COOLDOWN_SECONDS || '21600' }}
           NOTIFICATION_TIMEZONE: ${{ vars.NOTIFICATION_TIMEZONE || secrets.NOTIFICATION_TIMEZONE || 'Asia/Tokyo' }}
+          STOCK_RADAR_QA_OUTPUT_DIR: ./reports/screening
+          STOCK_RADAR_TIMEZONE: ${{ vars.STOCK_RADAR_TIMEZONE || 'Asia/Shanghai' }}
+          STOCK_RADAR_PRODUCTION_WEIGHTS_JSON: ${{ vars.STOCK_RADAR_PRODUCTION_WEIGHTS_JSON || '{}' }}
 
           SCHEDULED_ALERTS_ENABLED: ${{ vars.US_RESEARCH_ALERTS_ENABLED || 'false' }}
           MANUAL_ALERTS_ENABLED: ${{ inputs.send_alerts || false }}
@@ -290,6 +293,12 @@ jobs:
             echo "🔕 研究事件真实通知：未启用，仅生成提醒候选"
           fi
           python scripts/run_us_research_scan.py $ALERT_ARG
+
+          QA_ALERT_ARG=""
+          if [ -n "$ALERT_ARG" ]; then
+            QA_ALERT_ARG="--send-alerts"
+          fi
+          python scripts/run_stock_radar_qa.py --action auto $QA_ALERT_ARG
 
       - name: Checkpoint and validate research state
         if: always() && hashFiles('data/stock_analysis.db') != ''
@@ -317,6 +326,8 @@ jobs:
                       'research_candidate_financial_snapshots',
                       'research_candidate_financial_changes',
                       'research_priority_events',
+                      'stock_radar_validation_queue',
+                      'stock_radar_calibration_reviews',
                   )
                   for table in tracked:
                       if table in tables:

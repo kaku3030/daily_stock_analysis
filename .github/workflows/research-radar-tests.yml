@@ -19,6 +19,7 @@ on:
       - "src/services/screening/research_priority_notifications.py"
       - "src/services/stock_radar_v2/**"
       - "scripts/run_us_research_scan.py"
+      - "scripts/run_stock_radar_qa.py"
       - "tests/test_candidate_pool_repo.py"
       - "tests/test_candidate_pool_industry_metrics.py"
       - "tests/test_candidate_pool_financials.py"
@@ -75,7 +76,9 @@ jobs:
             tests/test_stock_radar_v2_router.py \
             tests/test_stock_radar_v2_confidence.py \
             tests/test_stock_radar_v2_notifications.py \
-            tests/test_stock_radar_v2_validation.py
+            tests/test_stock_radar_v2_runtime_notifications.py \
+            tests/test_stock_radar_v2_validation.py \
+            tests/test_run_stock_radar_qa.py
 
       - name: Import smoke test for US research scan
-        run: python -c "import scripts.run_us_research_scan; print('run_us_research_scan import ok')"
+        run: python -c "import scripts.run_us_research_scan; import scripts.run_stock_radar_qa; print('research runtime imports ok')"

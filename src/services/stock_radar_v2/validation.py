@@ -156,6 +156,24 @@ class ValidationQueue:
         ).fetchone()
         return int(row["count"])
 
+    def signal_types(self) -> list[str]:
+        rows = self._connection.execute(
+            """
+            SELECT DISTINCT signal_type FROM stock_radar_validation_queue
+            WHERE signal_type != '' ORDER BY signal_type
+            """
+        ).fetchall()
+        return [str(row["signal_type"]) for row in rows]
+
+    def calibration_reviews(self) -> list[dict[str, Any]]:
+        rows = self._connection.execute(
+            """
+            SELECT * FROM stock_radar_calibration_reviews
+            ORDER BY created_at DESC, review_id DESC
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def enqueue_calibration_review(
         self,
         *,

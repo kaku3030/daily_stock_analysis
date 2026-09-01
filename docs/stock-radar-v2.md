@@ -49,6 +49,18 @@ changes production weights. Candidate-weight discussion requires at least 30
 resolved samples, a candidate version, separate validation, and manual
 promotion.
 
+The stateful US research workflow runs Daily QA against the same
+`data/stock_analysis.db` database and runs Weekly Calibration on Mondays. It
+writes `stock_radar_daily_qa.{json,md}` and
+`stock_radar_weekly_calibration.{json,md}` into the research report artifact.
+External alerts remain opt-in and use the existing NotificationService route,
+deduplication, cooldown, and Telegram configuration.
+
+The research candidate pipeline does not automatically enqueue Confirmed
+signals. The Validation Queue stays empty until an explicit signal engine
+provides a genuine `confirmed` state; research-priority changes are not treated
+as trading signals.
+
 ## Configuration change control
 
 Critical defaults live in `src/services/stock_radar_v2/stock_radar_v2.yaml`.
