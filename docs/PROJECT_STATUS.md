@@ -12,11 +12,14 @@ Keep this file concise and factual. Update it at the end of each meaningful rese
 
 ## Current phase
 
-**News / catalyst change radar — implementation complete in this checkpoint; next phase is operational validation across multiple real stateful scans.**
+**Stock Radar V2 multi-timeframe state — runtime bridge in progress on top of the completed news/catalyst and data-reliability layers.**
 
 The radar stores point-in-time event evidence, deterministically suppresses repeated/paraphrased old events, identifies new catalysts and new risks, and feeds material changes into the existing research-priority / transition-gate path.
 
 Important invariant: missing evidence is not treated as confirmed risk resolution.
+
+The multi-timeframe bridge is research-only. It preserves Data Health signal
+permission and cannot create a Confirmed signal or trading instruction.
 
 ## Completed research-platform capabilities
 
