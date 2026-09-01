@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 新增研究雷达 MarketDataAdapter V1 契约与确定性 Data Health Gate，统一行情事实模型并按数据质量限制信号权限，不包含交易执行。
+- [改进] MarketDataAdapter V1 增加现有 DataFetcherManager 的只读桥接，仅规范化实时快照和日线事实，明确拒绝伪造分钟线与流式订阅能力。
+- [新功能] 新增会话感知的 1m 到 15m/1h Bar Builder，支持 A 股午休边界、forming/closed 状态、缺 K 降级与迟到分钟修正替换。
+- [新功能] 新增 PyTDX 只读 1m MarketDataAdapter，保留分钟时间戳并交由统一 Bar Builder 生成高周期；无 Provider 时间戳的快照仅允许 Watch，且不宣称原生流式订阅。
+- [新功能] 新增 QMT/xtquant 只读 1m MarketDataAdapter，支持官方 subscribe_quote 回调、历史 K 线与快照时间戳标准化，并在部分订阅失败时撤销已创建订阅。
+- [新功能] 新增健康门控 Provider Router 与只读 QMT smoke test：快照/分钟 K 在 QMT 异常或被阻断时显式降级 PyTDX，流式订阅失败不会静默变成轮询。
+- [新功能] 新增美股 Alpaca 只读 1m Adapter，保留 IEX/SIP feed，统一历史、最新 bar/quote，并同时处理 bars 与 updatedBars 以修正迟到成交。
+- [新功能] 新增只读 Realtime Market Data Service，按标的维护有界 1m 缓存、确定性替换修正 K 线、生成 15m/1h 快照并在活跃时段暴露 stale 健康降级。
 - [改进] 美股研究报告增加估值数据健康度与可信度标记，区分实时数据和历史缓存覆盖。
 - [修复] 美股研究扫描为 PE/PB 增加带时间戳的最近有效值缓存，并分别记录实时、缓存和缺失覆盖，降低 yfinance 临时缺失导致的候选排序波动。
 - [修复] 美股研究扫描不再把缺失 PE/PB 误判为估值不合格并清空候选；报告新增估值字段覆盖率诊断，筛选服务在未配置 LiteLLM 备用列表时继承 Gemini 备用模型。
