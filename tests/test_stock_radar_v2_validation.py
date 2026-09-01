@@ -24,6 +24,19 @@ def test_validation_queue_only_accepts_confirmed_signals() -> None:
         queue.enqueue(signal_id="s1", signal_type="breakout", signal_state="candidate")
 
 
+def test_queue_lists_signal_types_and_persisted_calibration_reviews() -> None:
+    queue = ValidationQueue()
+    _resolved(queue, "breakout", ["failed"] * 7 + ["passed"] * 3)
+    _resolved(queue, "reversal", ["passed"])
+
+    WeeklyCalibration(queue).evaluate("breakout", production_weights={})
+
+    assert queue.signal_types() == ["breakout", "reversal"]
+    reviews = queue.calibration_reviews()
+    assert reviews[0]["signal_type"] == "breakout"
+    assert reviews[0]["requires_manual_promotion"] == 1
+
+
 def test_daily_qa_summarizes_without_changing_signal() -> None:
     queue = ValidationQueue()
     signal = {"id": "s1", "state": "confirmed", "signal_confidence": 72}
