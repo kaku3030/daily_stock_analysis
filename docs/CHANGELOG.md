@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 新增 Stock Radar V2 MVP：配置化 provider fallback 防抖与 Critical 健康状态机、独立 signal/portfolio confidence、L3 `BLOCK_NEW_POSITION` 风险门禁、统一雷达通知出口，以及持久化 Validation Queue、Daily QA、Weekly Calibration 人工复核基础结构；不修改单标的 Signal 状态，不自动修改生产权重，不包含交易执行。
 - [新功能] 新增研究雷达 MarketDataAdapter V1 契约与确定性 Data Health Gate，统一行情事实模型并按数据质量限制信号权限，不包含交易执行。
 - [改进] MarketDataAdapter V1 增加现有 DataFetcherManager 的只读桥接，仅规范化实时快照和日线事实，明确拒绝伪造分钟线与流式订阅能力。
 - [新功能] 新增会话感知的 1m 到 15m/1h Bar Builder，支持 A 股午休边界、forming/closed 状态、缺 K 降级与迟到分钟修正替换。

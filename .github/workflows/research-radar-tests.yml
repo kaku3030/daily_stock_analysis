@@ -17,6 +17,7 @@ on:
       - "src/services/screening/research_priority.py"
       - "src/services/screening/research_priority_transition.py"
       - "src/services/screening/research_priority_notifications.py"
+      - "src/services/stock_radar_v2/**"
       - "scripts/run_us_research_scan.py"
       - "tests/test_candidate_pool_repo.py"
       - "tests/test_candidate_pool_industry_metrics.py"
@@ -30,6 +31,7 @@ on:
       - "tests/test_research_priority_repo.py"
       - "tests/test_research_priority_transition.py"
       - "tests/test_research_priority_notifications.py"
+      - "tests/test_stock_radar_v2_*.py"
       - ".github/workflows/research-radar-tests.yml"
   workflow_dispatch:
 
@@ -67,7 +69,13 @@ jobs:
             tests/test_research_priority.py \
             tests/test_research_priority_repo.py \
             tests/test_research_priority_transition.py \
-            tests/test_research_priority_notifications.py
+            tests/test_research_priority_notifications.py \
+            tests/test_stock_radar_v2_config.py \
+            tests/test_stock_radar_v2_health.py \
+            tests/test_stock_radar_v2_router.py \
+            tests/test_stock_radar_v2_confidence.py \
+            tests/test_stock_radar_v2_notifications.py \
+            tests/test_stock_radar_v2_validation.py
 
       - name: Import smoke test for US research scan
         run: python -c "import scripts.run_us_research_scan; print('run_us_research_scan import ok')"

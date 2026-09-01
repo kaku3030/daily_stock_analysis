@@ -1,0 +1,146 @@
+version: 1
+introduced_in: stock_radar_v2_mvp
+last_changed: 2026-09-01
+
+fallback:
+  fail_count:
+    value: 3
+    reason: Avoid switching providers on a single transient failure.
+    evidence: Locked MVP specification.
+    introduced_in: stock_radar_v2_mvp
+    last_changed: 2026-09-01
+  recovery_success_count:
+    value: 3
+    reason: Require stable primary recovery before failback.
+    evidence: Locked MVP specification.
+    introduced_in: stock_radar_v2_mvp
+    last_changed: 2026-09-01
+  health_check_interval_seconds:
+    value: 60
+    reason: Bound primary probe frequency while fallback is active.
+    evidence: Locked MVP specification.
+    introduced_in: stock_radar_v2_mvp
+    last_changed: 2026-09-01
+  cooldown_seconds:
+    value: 300
+    reason: Prevent rapid primary and fallback oscillation.
+    evidence: Locked MVP specification.
+    introduced_in: stock_radar_v2_mvp
+    last_changed: 2026-09-01
+
+critical:
+  timeout_seconds:
+    value: 5
+    reason: A request beyond five seconds is a severe latency observation.
+    evidence: Locked MVP specification.
+    introduced_in: stock_radar_v2_mvp
+    last_changed: 2026-09-01
+  timeout_count:
+    value: 5
+    reason: Require five consecutive severe timeouts before Critical.
+    evidence: Locked MVP specification.
+    introduced_in: stock_radar_v2_mvp
+    last_changed: 2026-09-01
+  empty_or_parse_count:
+    value: 3
+    reason: Repeated empty or unparseable payloads indicate provider failure.
+    evidence: Locked MVP specification.
+    introduced_in: stock_radar_v2_mvp
+    last_changed: 2026-09-01
+  closed_bar_integrity_count:
+    value: 2
+    reason: Two consecutive closed-bar integrity failures are not transient.
+    evidence: Locked MVP specification.
+    introduced_in: stock_radar_v2_mvp
+    last_changed: 2026-09-01
+
+confidence:
+  portfolio_levels:
+    l0_min:
+      value: 80
+      reason: Healthy portfolio context.
+      evidence: Locked MVP specification.
+      introduced_in: stock_radar_v2_mvp
+      last_changed: 2026-09-01
+    l1_min:
+      value: 60
+      reason: Moderately degraded portfolio context.
+      evidence: Locked MVP specification.
+      introduced_in: stock_radar_v2_mvp
+      last_changed: 2026-09-01
+    l2_min:
+      value: 40
+      reason: Weak context; below this level enters L3.
+      evidence: Locked MVP specification.
+      introduced_in: stock_radar_v2_mvp
+      last_changed: 2026-09-01
+  signal_weights:
+    data_quality:
+      value: 0.4
+      reason: Data integrity is the largest signal-confidence input.
+      evidence: Initial MVP policy; requires backtest evidence before change.
+      introduced_in: stock_radar_v2_mvp
+      last_changed: 2026-09-01
+    evidence_quality:
+      value: 0.35
+      reason: Independent evidence quality must remain material.
+      evidence: Initial MVP policy; requires backtest evidence before change.
+      introduced_in: stock_radar_v2_mvp
+      last_changed: 2026-09-01
+    consistency:
+      value: 0.25
+      reason: Cross-check consistency completes but does not dominate the score.
+      evidence: Initial MVP policy; requires backtest evidence before change.
+      introduced_in: stock_radar_v2_mvp
+      last_changed: 2026-09-01
+  portfolio_weights:
+    data_health:
+      value: 0.35
+      reason: Portfolio gating must respond strongly to unreliable facts.
+      evidence: Initial MVP policy; requires backtest evidence before change.
+      introduced_in: stock_radar_v2_mvp
+      last_changed: 2026-09-01
+    diversification:
+      value: 0.25
+      reason: Concentration risk is a portfolio-level condition.
+      evidence: Initial MVP policy; requires backtest evidence before change.
+      introduced_in: stock_radar_v2_mvp
+      last_changed: 2026-09-01
+    liquidity:
+      value: 0.2
+      reason: Liquidity affects portfolio risk without changing signal state.
+      evidence: Initial MVP policy; requires backtest evidence before change.
+      introduced_in: stock_radar_v2_mvp
+      last_changed: 2026-09-01
+    drawdown_resilience:
+      value: 0.2
+      reason: Drawdown resilience completes the independent portfolio view.
+      evidence: Initial MVP policy; requires backtest evidence before change.
+      introduced_in: stock_radar_v2_mvp
+      last_changed: 2026-09-01
+
+qa:
+  same_type_window:
+    value: 10
+    reason: Keep calibration evidence local and comparable.
+    evidence: Locked MVP specification.
+    introduced_in: stock_radar_v2_mvp
+    last_changed: 2026-09-01
+  failure_alert_count:
+    value: 7
+    reason: Seven failures among ten confirmed signals requires human review.
+    evidence: Locked MVP specification.
+    introduced_in: stock_radar_v2_mvp
+    last_changed: 2026-09-01
+  minimum_samples_for_weight_candidate:
+    value: 30
+    reason: Weight discussion needs enough resolved observations to be meaningful.
+    evidence: Locked MVP specification.
+    introduced_in: stock_radar_v2_mvp
+    last_changed: 2026-09-01
+  auto_update_production_weights:
+    value: false
+    reason: QA may recommend calibration but cannot mutate production weights.
+    evidence: Locked MVP specification.
+    introduced_in: stock_radar_v2_mvp
+    last_changed: 2026-09-01
