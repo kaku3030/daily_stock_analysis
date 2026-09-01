@@ -61,6 +61,20 @@ signals. The Validation Queue stays empty until an explicit signal engine
 provides a genuine `confirmed` state; research-priority changes are not treated
 as trading signals.
 
+## Multi-timeframe technical state bridge
+
+The runtime bridge reuses the existing neutral technical analyzer instead of
+duplicating indicator formulas. It converts normalized 15-minute and one-hour
+bars from `MarketDataSnapshot` and combines them with explicitly supplied daily
+bars. Forming, incomplete, or flagged bars remain partial and cap timeframe
+confidence. Missing daily data stays `unknown` rather than being inferred from
+intraday data.
+
+The bridge preserves the Data Health `signal_permission` exactly and exposes
+`research_only=true` and `can_confirm_signal=false`. Its output is technical
+evidence for later review; it cannot create a Confirmed signal or a trading
+instruction.
+
 ## Configuration change control
 
 Critical defaults live in `src/services/stock_radar_v2/stock_radar_v2.yaml`.
