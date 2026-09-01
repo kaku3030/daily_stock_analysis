@@ -62,6 +62,11 @@ def _research_alert_dispatch_enabled() -> bool:
 def _markdown(payload: dict) -> str:
     coverage = payload.get("universe_coverage_ratio")
     coverage_text = f"{float(coverage) * 100:.1f}%" if coverage is not None else "未知"
+    valuation_health = payload.get("valuation_health") or {}
+    confidence_labels = {"high": "高", "medium": "中", "low": "低"}
+    confidence = confidence_labels.get(str(valuation_health.get("confidence")), "未知")
+    effective_coverage = float(valuation_health.get("effective_coverage_ratio") or 0) * 100
+    live_coverage = float(valuation_health.get("live_coverage_ratio") or 0) * 100
     lines = [
         "# 美股每日研究候选",
         "",
@@ -73,6 +78,8 @@ def _markdown(payload: dict) -> str:
         f"- 计划扫描数：{payload.get('universe_count', 0)}",
         f"- 成功快照数：{payload.get('universe_snapshot_count', payload.get('snapshot_count', 0))}",
         f"- 股票池覆盖率：{coverage_text}",
+        f"- 估值数据可信度：{confidence}",
+        f"- 估值有效覆盖率：{effective_coverage:.1f}%（实时最低覆盖 {live_coverage:.1f}%）",
         f"- 筛选后数量：{payload.get('after_filter_count', 0)}",
         f"- 发布状态：{payload.get('publication_status', 'published')}",
         "",

@@ -177,7 +177,9 @@ def screen(
     snapshot_source = str(snapshot_df.attrs.get("snapshot_source", ""))
     source_errors = [str(item) for item in snapshot_df.attrs.get("source_errors", [])]
     universe_metadata = _universe_metadata(snapshot_df)
+    valuation_health: dict[str, object] = {}
     if market == "us":
+        valuation_health = _us_valuation_health(snapshot_df)
         valuation_coverage_note = _us_valuation_coverage_note(snapshot_df)
         degradation.append(valuation_coverage_note)
         logger.info(valuation_coverage_note)
@@ -227,6 +229,7 @@ def screen(
             degradation=[*degradation, "No candidates after hard filter"],
             snapshot_source=snapshot_source,
             source_errors=source_errors,
+            valuation_health=valuation_health,
             **universe_metadata,
             strategy_version=strat.version,
             strategy_category=strat.category,
@@ -327,6 +330,7 @@ def screen(
             degradation=[*degradation, "No candidates after daily hard filter"],
             snapshot_source=snapshot_source,
             source_errors=source_errors,
+            valuation_health=valuation_health,
             **universe_metadata,
             post_analyzers=analyzer_names,
             daily_enriched=daily_enriched,
@@ -561,6 +565,7 @@ def screen(
         degradation=degradation,
         snapshot_source=snapshot_source,
         source_errors=source_errors,
+        valuation_health=valuation_health,
         **universe_metadata,
         deep_analysis_requested=("dsa" in analyzer_names),
         post_analyzers=analyzer_names,
@@ -725,6 +730,55 @@ def _us_valuation_coverage_note(snapshot_df: pd.DataFrame) -> str:
         ratio = available / total * 100.0 if total else 0.0
         parts.append(f"{field}={available}/{total} ({ratio:.1f}%)")
     return "US snapshot valuation coverage: " + ", ".join(parts)
+
+
+def _us_valuation_health(snapshot_df: pd.DataFrame) -> dict[str, object]:
+    """Summarize valuation freshness without changing screening decisions."""
+    total = len(snapshot_df)
+    sources = snapshot_df.attrs.get("valuation_sources")
+    if not isinstance(sources, dict) or total <= 0:
+        return {
+            "status": "critical",
+            "confidence": "low",
+            "effective_coverage_ratio": 0.0,
+            "live_coverage_ratio": 0.0,
+            "request_error_ratio": 0.0,
+            "request_errors": 0,
+        }
+
+    effective_ratios: list[float] = []
+    live_ratios: list[float] = []
+    cached_counts: list[int] = []
+    for field in ("pe_ratio", "pb_ratio"):
+        counts = sources.get(field)
+        if not isinstance(counts, dict):
+            counts = {}
+        live = int(counts.get("live", 0) or 0)
+        cached = int(counts.get("cached", 0) or 0)
+        live_ratios.append(min(live / total, 1.0))
+        effective_ratios.append(min((live + cached) / total, 1.0))
+        cached_counts.append(cached)
+
+    effective_coverage = min(effective_ratios)
+    live_coverage = min(live_ratios)
+    request_errors = int(sources.get("request_errors", 0) or 0)
+    request_error_ratio = min(request_errors / total, 1.0)
+
+    if effective_coverage < 0.70 or (live_coverage <= 0.10 and request_error_ratio >= 0.50):
+        status, confidence = "critical", "low"
+    elif request_errors > 0 or live_coverage < 0.80 or any(cached_counts):
+        status, confidence = "degraded", "medium"
+    else:
+        status, confidence = "healthy", "high"
+
+    return {
+        "status": status,
+        "confidence": confidence,
+        "effective_coverage_ratio": round(effective_coverage, 6),
+        "live_coverage_ratio": round(live_coverage, 6),
+        "request_error_ratio": round(request_error_ratio, 6),
+        "request_errors": request_errors,
+    }
 
 
 def _us_valuation_source_note(snapshot_df: pd.DataFrame) -> str:
