@@ -22,6 +22,7 @@ on:
       - "src/services/screening/research_priority_transition.py"
       - "src/services/screening/research_priority_notifications.py"
       - "src/services/stock_radar_v2/**"
+      - "src/services/strategy_lab/**"
       - "scripts/run_us_research_scan.py"
       - "scripts/run_stock_radar_qa.py"
       - "scripts/run_stock_radar_technical_state.py"
@@ -39,6 +40,7 @@ on:
       - "tests/test_research_priority_transition.py"
       - "tests/test_research_priority_notifications.py"
       - "tests/test_stock_radar_v2_*.py"
+      - "tests/test_strategy_lab_*.py"
       - ".github/workflows/research-radar-tests.yml"
   workflow_dispatch:
 
@@ -89,6 +91,8 @@ jobs:
             tests/test_stock_radar_v2_technical_state_history.py \
             tests/test_stock_radar_v2_technical_state_radar.py \
             tests/test_stock_radar_v2_validation.py \
+            tests/test_strategy_lab_hard_gates.py \
+            tests/test_strategy_lab_adversarial.py \
             tests/test_run_stock_radar_qa.py \
             tests/test_run_stock_radar_technical_state.py
 

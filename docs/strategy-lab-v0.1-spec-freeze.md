@@ -129,7 +129,7 @@ Strategy Lab delivery status:
 | Soft Gate pipeline | Planned |
 | Parameter Stability Engine | Planned |
 | Edge Concentration Engine | Planned |
-| Permanent five-fixture adversarial suite | Planned |
+| Permanent five-fixture adversarial suite | Implemented |
 | Cost/execution stress, OOS/walk-forward, benchmark/alpha, and regime checks | Planned |
 | Component attribution | Planned |
 | Breakout/retest/Chandelier experiment | Deferred until validation infrastructure exists |
@@ -137,8 +137,16 @@ Strategy Lab delivery status:
 The implemented foundation lives in `src/services/strategy_lab/`. Its Hard
 Gate pipeline has no dependency on `PerformanceReport`, evaluates the frozen
 gate set in order, and exposes eligibility for expensive validation only after
-all Hard Gates pass. It does not yet implement the validation checks themselves
-or any strategy experiment.
+all Hard Gates pass. It does not yet implement the full production validation
+engines or any strategy experiment.
+
+The permanent suite lives in `tests/test_strategy_lab_adversarial.py` and is
+explicitly included in the Research Radar CI workflow. Its fixed manifest
+contains look-ahead, parameter overfit, concentrated edge, cost fragility, and
+beta-disguised-as-alpha cases plus matching valid controls. The deterministic
+checks live in `src/services/strategy_lab/adversarial_checks.py`; thresholds
+requiring later calibration are explicit inputs, so fixture values do not
+become production defaults.
 
 ## Explicit non-goals
 
