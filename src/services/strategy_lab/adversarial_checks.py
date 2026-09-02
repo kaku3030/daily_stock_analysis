@@ -17,7 +17,7 @@ def assess_no_lookahead(
     signal_confirmed_at: datetime,
     latest_input_at: datetime,
 ) -> GateResult:
-    passed = latest_input_at <= signal_confirmed_at
+    passed = latest_input_at >= signal_confirmed_at
     return GateResult(
         gate="lookahead",
         passed=passed,
