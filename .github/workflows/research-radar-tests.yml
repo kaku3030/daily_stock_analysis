@@ -82,6 +82,7 @@ jobs:
             tests/test_stock_radar_v2_runtime_notifications.py \
             tests/test_stock_radar_v2_technical_state.py \
             tests/test_stock_radar_v2_technical_state_history.py \
+            tests/test_stock_radar_v2_technical_state_radar.py \
             tests/test_stock_radar_v2_validation.py \
             tests/test_run_stock_radar_qa.py
 

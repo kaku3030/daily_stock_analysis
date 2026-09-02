@@ -90,6 +90,26 @@ state, structure, and data quality. Only permission downgrade and a genuine
 known-to-known daily trend change are marked material. These are research
 review facts: they do not notify, change research weights, or confirm a signal.
 
+## Technical state change radar output
+
+`StockRadarTechnicalStateRadar` is the caller-facing publication boundary for
+already-computed technical states. It atomically reuses the point-in-time
+repository, compares each symbol with its prior valid run, and writes the
+current run to:
+
+- `{market}_stock_radar_technical_state_radar.json`
+- `{market}_stock_radar_technical_state_radar.md`
+
+Repeated publication of the same market, symbol, and run ID is idempotent. The
+JSON keeps complete machine-readable evidence and deterministic change detail;
+the Markdown provides a compact Daily / 1H / 15m research review table.
+
+The publisher does not fetch or infer market data. A future QMT or Alpaca
+runtime caller must supply genuine `StockRadarTechnicalState` values and an
+explicit run ID. Publication remains research-only: it does not call Telegram,
+enqueue Validation Queue rows, change a score or production weight, create a
+Confirmed signal, or emit a trading instruction.
+
 ## Configuration change control
 
 Critical defaults live in `src/services/stock_radar_v2/stock_radar_v2.yaml`.

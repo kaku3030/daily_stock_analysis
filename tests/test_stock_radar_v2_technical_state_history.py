@@ -23,6 +23,14 @@ from src.technical.models import (
 NOW = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
 
 
+def setup_function() -> None:
+    DatabaseManager.reset_instance()
+
+
+def teardown_function() -> None:
+    DatabaseManager.reset_instance()
+
+
 def _timeframe(timeframe: str, trend: str, *, score: int = 60) -> TimeframeState:
     return TimeframeState(
         timeframe=timeframe,
@@ -117,8 +125,8 @@ def test_permission_recovery_is_non_material_research_state() -> None:
     assert change["material"] is False
 
 
-def test_repository_is_idempotent_and_compares_adjacent_runs() -> None:
-    db = DatabaseManager("sqlite:///:memory:")
+def test_repository_is_idempotent_and_compares_adjacent_runs(tmp_path) -> None:
+    db = DatabaseManager(db_url=f"sqlite:///{tmp_path / 'history.db'}")
     repo = StockRadarTechnicalStateRepository(db)
 
     assert repo.sync_run("us", "run-1", [_state()]) == 1
