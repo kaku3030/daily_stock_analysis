@@ -326,6 +326,7 @@ jobs:
                       'research_candidate_financial_snapshots',
                       'research_candidate_financial_changes',
                       'research_priority_events',
+                      'stock_radar_technical_state_snapshots',
                       'stock_radar_validation_queue',
                       'stock_radar_calibration_reviews',
                   )
