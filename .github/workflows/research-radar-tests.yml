@@ -11,6 +11,7 @@ on:
       - "src/repositories/research_event_repo.py"
       - "src/repositories/research_priority_repo.py"
       - "src/repositories/stock_radar_technical_state_repo.py"
+      - "data_provider/alpaca_market_data_adapter.py"
       - "src/schemas/research_financials.py"
       - "src/services/screening/industry_radar.py"
       - "src/services/screening/earnings_valuation_radar.py"
@@ -23,7 +24,9 @@ on:
       - "src/services/stock_radar_v2/**"
       - "scripts/run_us_research_scan.py"
       - "scripts/run_stock_radar_qa.py"
+      - "scripts/run_stock_radar_technical_state.py"
       - "tests/test_candidate_pool_repo.py"
+      - "tests/test_alpaca_market_data_adapter.py"
       - "tests/test_candidate_pool_industry_metrics.py"
       - "tests/test_candidate_pool_financials.py"
       - "tests/test_industry_radar.py"
@@ -62,6 +65,7 @@ jobs:
       - name: Run focused research radar tests
         run: |
           python -m pytest -q \
+            tests/test_alpaca_market_data_adapter.py \
             tests/test_candidate_pool_repo.py \
             tests/test_candidate_pool_industry_metrics.py \
             tests/test_candidate_pool_financials.py \
@@ -80,11 +84,13 @@ jobs:
             tests/test_stock_radar_v2_confidence.py \
             tests/test_stock_radar_v2_notifications.py \
             tests/test_stock_radar_v2_runtime_notifications.py \
+            tests/test_stock_radar_v2_provider_runtime.py \
             tests/test_stock_radar_v2_technical_state.py \
             tests/test_stock_radar_v2_technical_state_history.py \
             tests/test_stock_radar_v2_technical_state_radar.py \
             tests/test_stock_radar_v2_validation.py \
-            tests/test_run_stock_radar_qa.py
+            tests/test_run_stock_radar_qa.py \
+            tests/test_run_stock_radar_technical_state.py
 
       - name: Import smoke test for US research scan
-        run: python -c "import scripts.run_us_research_scan; import scripts.run_stock_radar_qa; print('research runtime imports ok')"
+        run: python -c "import scripts.run_us_research_scan; import scripts.run_stock_radar_qa; import scripts.run_stock_radar_technical_state; print('research runtime imports ok')"

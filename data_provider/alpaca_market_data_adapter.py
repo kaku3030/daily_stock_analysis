@@ -76,7 +76,7 @@ class AlpacaRestMarketDataClient:
     def get_bars(self, symbol: str, *, start: str, end: str, limit: int, feed: str) -> list[dict]:
         payload = self._get(
             f"/v2/stocks/{urllib.parse.quote(symbol)}/bars",
-            {"timeframe": "1Min", "start": start, "end": end, "limit": limit, "feed": feed, "sort": "asc"},
+            {"timeframe": "1Min", "start": start, "end": end, "limit": limit, "feed": feed, "sort": "desc"},
         )
         return list(payload.get("bars") or [])
 

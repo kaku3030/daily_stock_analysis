@@ -13,8 +13,9 @@ Keep this file concise and factual. Update it at the end of each meaningful rese
 ## Current phase
 
 **Stock Radar V2 multi-timeframe state — runtime bridge, point-in-time history,
-deterministic adjacent-run comparison, and research-only radar publication are
-complete. Real provider scheduling is the next phase.**
+deterministic adjacent-run comparison, research-only radar publication, and a
+one-shot QMT/Alpaca provider runtime are complete. Real-environment validation
+and repeated run accumulation are the current phase.**
 
 The radar stores point-in-time event evidence, deterministically suppresses repeated/paraphrased old events, identifies new catalysts and new risks, and feeds material changes into the existing research-priority / transition-gate path.
 
@@ -28,7 +29,8 @@ fingerprint. It records categorical transitions for later validation but does
 not notify, alter weights, or promote a state into a signal.
 
 The technical-state radar writes current-run JSON and Markdown from explicitly
-supplied states. It does not fetch market data or run on a schedule yet.
+supplied states. The provider runtime can now fetch read-only QMT/Alpaca 1m
+facts and existing Daily history for an explicit run ID. It is not scheduled.
 
 ## Completed research-platform capabilities
 
@@ -45,6 +47,8 @@ supplied states. It does not fetch market data or run on a schedule yet.
 - SQLite `quick_check`, WAL checkpointing, cache save/restore, and cross-run state validation.
 - Telegram connectivity wired into the stateful workflow and manually verified.
 - Idempotent multi-timeframe technical-state radar JSON/Markdown publisher.
+- One-shot QMT/Alpaca technical-state runtime with per-symbol failure isolation
+  and sanitized run diagnostics.
 
 ## Research philosophy and invariants
 
@@ -115,9 +119,10 @@ Deterministic normalization/fingerprinting is preferred over LLM judgement for d
 
 ## Validation next
 
-- Wire a real QMT or Alpaca runtime caller to provide computed technical states
-  and explicit run IDs; do not infer missing bars or silently substitute data.
-- Accumulate several real runs before considering any technical-state alert
+- Run the QMT path in the connected local xtquant environment and the Alpaca
+  path with verified read-only market-data credentials; CI has not verified
+  either external runtime.
+- Accumulate several explicit real run IDs before considering any technical-state alert
   policy. The current publisher intentionally emits no Telegram notification.
 - Let multiple real stateful scans accumulate so adjacent event comparisons can be observed on real candidates.
 - Inspect `new_catalyst` / `new_risk` frequency and false-positive rate before enabling automatic Telegram research alerts.

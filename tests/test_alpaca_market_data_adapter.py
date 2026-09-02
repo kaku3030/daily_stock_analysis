@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from data_provider.alpaca_market_data_adapter import AlpacaMarketDataAdapter
+from data_provider.alpaca_market_data_adapter import AlpacaMarketDataAdapter, AlpacaRestMarketDataClient
 
 
 NOW = datetime(2026, 9, 1, 14, 31, tzinfo=timezone.utc)
@@ -33,6 +33,27 @@ class FakeStream:
 
     def subscribe_updated_bars(self, handler, *symbols):
         self.updated_subscription = (handler, symbols)
+
+
+def test_alpaca_rest_history_requests_latest_page() -> None:
+    client = AlpacaRestMarketDataClient("key", "secret")
+    captured = {}
+
+    def fake_get(path, params):
+        captured.update({"path": path, "params": params})
+        return {"bars": []}
+
+    client._get = fake_get
+    client.get_bars(
+        "NVDA",
+        start="2026-08-01T00:00:00+00:00",
+        end="2026-09-01T00:00:00+00:00",
+        limit=3000,
+        feed="iex",
+    )
+
+    assert captured["params"]["sort"] == "desc"
+    assert captured["params"]["start"] == "2026-08-01T00:00:00+00:00"
 
 
 def test_alpaca_history_keeps_feed_timestamp_and_vwap() -> None:
