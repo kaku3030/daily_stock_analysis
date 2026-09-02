@@ -127,7 +127,7 @@ Strategy Lab delivery status:
 | Separate `ValidationReport` and `PerformanceReport` contracts | Implemented foundation |
 | Ordered, fail-closed Hard Gate pipeline | Implemented foundation |
 | Soft Gate pipeline | Planned |
-| Parameter Stability Engine | Planned |
+| Parameter Stability Engine | Implemented — Foundation |
 | Edge Concentration Engine | Planned |
 | Permanent five-fixture adversarial suite | Implemented |
 | Cost/execution stress, OOS/walk-forward, benchmark/alpha, and regime checks | Planned |
@@ -147,6 +147,19 @@ beta-disguised-as-alpha cases plus matching valid controls. The deterministic
 checks live in `src/services/strategy_lab/adversarial_checks.py`; thresholds
 requiring later calibration are explicit inputs, so fixture values do not
 become production defaults.
+
+The Parameter Stability Engine foundation lives in
+`src/services/strategy_lab/parameter_stability.py`, with its thresholds in
+the sibling `strategy_lab_validation.yaml` (loaded through `config.py`,
+mirroring the `stock_radar_v2` configuration pattern). It evaluates a
+caller-supplied parameter neighborhood and reports plateau width, an
+adjacent-neighbor parameter-cliff ratio, and a `stability_label`; it never
+reads `PerformanceReport` fields and makes no claim about whether a stable
+surface is profitable. It is a standalone, reusable analysis module today —
+it is not yet wired into `HardGatePipeline` as a Soft Gate, and the existing
+`assess_parameter_stability` adversarial-suite check in
+`adversarial_checks.py` is unchanged and remains the permanent regression
+fixture for the `parameter_overfit` case.
 
 ## Explicit non-goals
 
