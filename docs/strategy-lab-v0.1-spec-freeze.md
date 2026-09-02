@@ -120,18 +120,25 @@ implementation of Strategy Lab:
 | Validation Queue, Daily QA, Weekly Calibration, manual weight boundary | `src/services/stock_radar_v2/validation.py`, `tests/test_stock_radar_v2_validation.py` | Implemented foundation |
 | Read-only provider runtime and technical-state history | `src/services/stock_radar_v2/provider_runtime.py`, `tests/test_stock_radar_v2_provider_runtime.py` | Implemented |
 
-The following Strategy Lab items remain unimplemented at the freeze point:
+Strategy Lab delivery status:
 
 | Frozen item | Status |
 | --- | --- |
-| Separate `ValidationReport` and `PerformanceReport` contracts | Planned |
-| Strategy Lab Hard/Soft Gate pipeline | Planned |
+| Separate `ValidationReport` and `PerformanceReport` contracts | Implemented foundation |
+| Ordered, fail-closed Hard Gate pipeline | Implemented foundation |
+| Soft Gate pipeline | Planned |
 | Parameter Stability Engine | Planned |
 | Edge Concentration Engine | Planned |
 | Permanent five-fixture adversarial suite | Planned |
 | Cost/execution stress, OOS/walk-forward, benchmark/alpha, and regime checks | Planned |
 | Component attribution | Planned |
 | Breakout/retest/Chandelier experiment | Deferred until validation infrastructure exists |
+
+The implemented foundation lives in `src/services/strategy_lab/`. Its Hard
+Gate pipeline has no dependency on `PerformanceReport`, evaluates the frozen
+gate set in order, and exposes eligibility for expensive validation only after
+all Hard Gates pass. It does not yet implement the validation checks themselves
+or any strategy experiment.
 
 ## Explicit non-goals
 

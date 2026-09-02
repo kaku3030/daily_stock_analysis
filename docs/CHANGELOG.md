@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] Strategy Lab V0.1 新增彼此隔离的 Validation/Performance 报告契约与固定顺序、首错即停的 Hard Gate 基础管线；业绩指标不能覆盖验证失败，尚不包含具体策略检查或回测能力。
 - [文档] 冻结 Strategy Lab V0.1 规格，明确 Validation/Performance 隔离、Hard Gate、永久对抗回归测试、实现顺序、现有 Stock Radar 前置能力映射及研究专用边界。
 - [新功能] Stock Radar V2 新增 QMT/Alpaca 一次运行编排入口，将真实只读 1m 数据、现有 Daily 历史、技术状态快照和雷达报告串联；配置跨日历史窗口并优先读取最新数据，显式校验市场、隔离并脱敏单标的失败，缺失数据不伪造，且不自动通知或生成交易指令。
 - [新功能] Stock Radar V2 新增多周期技术状态变化雷达发布器，为已计算状态生成幂等 JSON/Markdown 研究报告；不抓取或推断行情，不通知、不入 Validation Queue、不调权、不生成 Confirmed signal 或交易指令。
