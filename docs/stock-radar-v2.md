@@ -75,6 +75,21 @@ The bridge preserves the Data Health `signal_permission` exactly and exposes
 evidence for later review; it cannot create a Confirmed signal or a trading
 instruction.
 
+## Point-in-time technical state history
+
+Categorical Daily / 1H / 15m state can be stored in
+`stock_radar_technical_state_snapshots` under a caller-supplied `run_id`.
+Writes are idempotent per market, symbol, and run. Each row keeps the full
+point-in-time evidence, a stable categorical fingerprint, the previous run ID,
+and deterministic change detail.
+
+The fingerprint deliberately excludes timestamps and small numeric indicator
+drift. Recorded changes include provider-permission downgrade or recovery,
+daily trend or availability changes, multi-timeframe alignment, lower-timeframe
+state, structure, and data quality. Only permission downgrade and a genuine
+known-to-known daily trend change are marked material. These are research
+review facts: they do not notify, change research weights, or confirm a signal.
+
 ## Configuration change control
 
 Critical defaults live in `src/services/stock_radar_v2/stock_radar_v2.yaml`.

@@ -12,6 +12,7 @@ from .notifications import RadarNotification, RadarNotifier, notify
 from .router import DebouncedMarketDataRouter
 from .runtime_notifications import NotificationServiceRadarSink
 from .technical_state import StockRadarTechnicalState, StockRadarTechnicalStateService
+from .technical_state_history import compare_technical_states, technical_state_fingerprint
 from .validation import DailyQA, ValidationQueue, WeeklyCalibration
 
 __all__ = [
@@ -32,6 +33,8 @@ __all__ = [
     "WeeklyCalibration",
     "assess_portfolio_confidence",
     "calculate_signal_confidence",
+    "compare_technical_states",
     "load_stock_radar_config",
     "notify",
+    "technical_state_fingerprint",
 ]

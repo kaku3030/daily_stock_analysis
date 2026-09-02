@@ -10,6 +10,7 @@ on:
       - "src/repositories/financial_change_repo.py"
       - "src/repositories/research_event_repo.py"
       - "src/repositories/research_priority_repo.py"
+      - "src/repositories/stock_radar_technical_state_repo.py"
       - "src/schemas/research_financials.py"
       - "src/services/screening/industry_radar.py"
       - "src/services/screening/earnings_valuation_radar.py"
@@ -80,6 +81,7 @@ jobs:
             tests/test_stock_radar_v2_notifications.py \
             tests/test_stock_radar_v2_runtime_notifications.py \
             tests/test_stock_radar_v2_technical_state.py \
+            tests/test_stock_radar_v2_technical_state_history.py \
             tests/test_stock_radar_v2_validation.py \
             tests/test_run_stock_radar_qa.py
 
