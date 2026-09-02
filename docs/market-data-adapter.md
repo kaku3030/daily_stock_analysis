@@ -16,6 +16,7 @@ instructions, or place orders.
 | Bar Builder | Session-aware 1m to 15m/1h aggregation | Uses configured sessions; no exchange calendar is embedded |
 | Data Health Gate | Deterministic score, grade, quality flags, and signal permission | Cross-provider checks are not yet implemented |
 | Realtime Market Data Service | Bounded 1m cache, correction replacement, 15m/1h snapshots, freshness diagnostics | Does not calculate indicators or emit signals |
+| Stock Radar provider runtime | One-shot QMT/Alpaca 1m ingestion plus explicit Daily history and radar publication | Not a daemon; requires a real local provider environment and explicit run ID |
 
 Higher timeframes are built from normalized 1m facts so providers cannot
 silently apply different 15m/1h boundaries. The A-share builder does not span

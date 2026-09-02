@@ -20,6 +20,10 @@ def test_locked_mvp_defaults_load_from_yaml() -> None:
     assert config.qa.failure_alert_count == 7
     assert config.qa.minimum_samples_for_weight_candidate == 30
     assert config.qa.auto_update_production_weights is False
+    assert config.runtime.minute_history_limit == 3000
+    assert config.runtime.history_lookback_days == 30
+    assert config.runtime.daily_history_limit == 120
+    assert config.runtime.freshness_limit_seconds == 120
 
 
 def test_key_defaults_include_change_control_metadata() -> None:
@@ -34,6 +38,7 @@ def test_key_defaults_include_change_control_metadata() -> None:
         raw["qa"]["failure_alert_count"],
         raw["qa"]["minimum_samples_for_weight_candidate"],
         raw["qa"]["auto_update_production_weights"],
+        *raw["runtime"].values(),
     ]
     for item in items:
         assert {"value", "reason", "evidence", "introduced_in", "last_changed"} <= set(item)

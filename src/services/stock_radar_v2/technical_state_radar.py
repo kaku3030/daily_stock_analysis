@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from src.repositories.stock_radar_technical_state_repo import (
     StockRadarTechnicalStateRepository,
@@ -27,6 +27,7 @@ class StockRadarTechnicalStateRadar:
         run_id: str,
         states: Sequence[StockRadarTechnicalState],
         output_dir: str | Path,
+        runtime_metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         market = market.strip().lower()
         run_id = run_id.strip()
@@ -49,6 +50,8 @@ class StockRadarTechnicalStateRadar:
             "material_count": sum(bool(row.get("material")) for row in rows),
             "rows": rows,
         }
+        if runtime_metadata is not None:
+            payload["runtime"] = dict(runtime_metadata)
         output = Path(output_dir)
         output.mkdir(parents=True, exist_ok=True)
         stem = output / f"{market}_stock_radar_technical_state_radar"
@@ -59,7 +62,12 @@ class StockRadarTechnicalStateRadar:
             encoding="utf-8",
         )
         markdown_path.write_text(
-            technical_state_radar_markdown(rows, market=market, run_id=run_id),
+            technical_state_radar_markdown(
+                rows,
+                market=market,
+                run_id=run_id,
+                runtime_metadata=runtime_metadata,
+            ),
             encoding="utf-8",
         )
         return {
@@ -74,6 +82,7 @@ def technical_state_radar_markdown(
     *,
     market: str,
     run_id: str,
+    runtime_metadata: Mapping[str, Any] | None = None,
 ) -> str:
     lines = [
         "# Stock Radar V2 多周期技术状态变化",
@@ -82,10 +91,23 @@ def technical_state_radar_markdown(
         "",
         f"- 市场：{market}",
         f"- Run ID：{run_id}",
-        "",
-        "| 股票 | 变化状态 | 关注度 | 数据权限 | 日线 | 1H | 15m | 多周期 |",
-        "|---|---|---|---|---|---|---|---|",
     ]
+    if runtime_metadata is not None:
+        lines.extend(
+            [
+                f"- 请求标的：{runtime_metadata.get('requested_count', 0)}",
+                f"- 成功评估：{runtime_metadata.get('evaluated_count', 0)}",
+                f"- 失败：{runtime_metadata.get('failed_count', 0)}",
+                f"- 降级：{runtime_metadata.get('warning_count', 0)}",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "| 股票 | 变化状态 | 关注度 | 数据权限 | 日线 | 1H | 15m | 多周期 |",
+            "|---|---|---|---|---|---|---|---|",
+        ]
+    )
     if not rows:
         lines.append("| 暂无技术状态 | - | - | - | - | - | - | - |")
         return "\n".join(lines) + "\n"

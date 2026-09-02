@@ -4,6 +4,11 @@ Stock Radar V2 adds reliability, risk gating, and validation around the
 read-only MarketDataAdapter V1 facts. It remains a research system: it does not
 place orders or turn QA observations into trading instructions.
 
+The next validation-infrastructure stage is governed by the separate
+[Strategy Lab V0.1 Spec Freeze](strategy-lab-v0.1-spec-freeze.md). The current
+MVP supplies prerequisites only; it must not be described as already
+implementing the frozen Strategy Lab engines or adversarial suite.
+
 ## Provider stability and Critical health
 
 The primary provider enters fallback after three consecutive failures. It can
@@ -109,6 +114,47 @@ runtime caller must supply genuine `StockRadarTechnicalState` values and an
 explicit run ID. Publication remains research-only: it does not call Telegram,
 enqueue Validation Queue rows, change a score or production weight, create a
 Confirmed signal, or emit a trading instruction.
+
+## One-shot QMT / Alpaca provider runtime
+
+`StockRadarProviderRuntime` connects the existing read-only provider adapters
+to the technical-state bridge and radar publisher for one explicit run:
+
+`provider 1m facts -> session-aware 15m/1H bars -> supplied daily history -> technical state -> snapshot/report`
+
+The runtime de-duplicates symbols, rejects CN/US market mismatches, isolates a
+single-symbol provider failure, and sanitizes persisted diagnostics. Missing
+daily history does not block lower-timeframe research state; Daily remains
+`unknown` and the report records a degradation. Missing or wrong-market 1m
+facts do not produce a row.
+
+Run QMT in the local Python environment that has a connected `xtquant` runtime:
+
+```bash
+python scripts/run_stock_radar_technical_state.py \
+  --provider qmt --market cn --symbol 600519 \
+  --run-id qmt-20260902-01
+```
+
+For Alpaca, supply the standard read-only market-data environment variables
+`APCA_API_KEY_ID` and `APCA_API_SECRET_KEY`:
+
+```bash
+python scripts/run_stock_radar_technical_state.py \
+  --provider alpaca --market us --symbol NVDA --symbol TSLA \
+  --run-id alpaca-20260902-01 --alpaca-feed iex
+```
+
+Both paths reuse `DataFetcherManager` only for Daily history and write to the
+configured stateful SQLite database. `--symbol` may be repeated. `--run-id` is
+required; repeating the same run remains idempotent. The default minute request
+uses a 30-calendar-day window and takes the provider's latest page so the
+session-aware builder can form at least 20 hourly bars when coverage is healthy.
+
+No provider runtime is scheduled automatically. CI uses injected read-only
+adapters and cannot prove local QMT connectivity, Alpaca entitlement, feed
+coverage, or credential validity. Those must be verified in the actual runtime
+environment before accumulating real runs.
 
 ## Configuration change control
 

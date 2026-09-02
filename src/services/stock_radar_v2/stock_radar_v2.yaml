@@ -1,6 +1,6 @@
-version: 1
+version: 2
 introduced_in: stock_radar_v2_mvp
-last_changed: 2026-09-01
+last_changed: 2026-09-02
 
 fallback:
   fail_count:
@@ -144,3 +144,29 @@ qa:
     evidence: Locked MVP specification.
     introduced_in: stock_radar_v2_mvp
     last_changed: 2026-09-01
+
+runtime:
+  minute_history_limit:
+    value: 3000
+    reason: Supply at least 20 session-aware hourly bars for both CN and US markets.
+    evidence: TechnicalAnalyzer requires 20 aggregated bars for a non-partial timeframe state.
+    introduced_in: stock_radar_v2_provider_runtime
+    last_changed: 2026-09-02
+  history_lookback_days:
+    value: 30
+    reason: Ensure minute history crosses enough trading sessions for 20 or more hourly bars.
+    evidence: Alpaca defaults start to the current day when omitted; CN also needs calendar buffer for 3000 minutes.
+    introduced_in: stock_radar_v2_provider_runtime
+    last_changed: 2026-09-02
+  daily_history_limit:
+    value: 120
+    reason: Supply stable daily MA and momentum evidence without unbounded provider reads.
+    evidence: TechnicalAnalyzer calculates MA60 and uses at least 20 bars for a known state.
+    introduced_in: stock_radar_v2_provider_runtime
+    last_changed: 2026-09-02
+  freshness_limit_seconds:
+    value: 120
+    reason: Preserve the existing active-session stale-data downgrade boundary.
+    evidence: RealtimeMarketDataService V1 default and focused stale-data tests.
+    introduced_in: stock_radar_v2_provider_runtime
+    last_changed: 2026-09-02

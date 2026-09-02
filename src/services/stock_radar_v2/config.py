@@ -49,12 +49,21 @@ class QAConfig:
 
 
 @dataclass(frozen=True)
+class RuntimeConfig:
+    minute_history_limit: int
+    history_lookback_days: int
+    daily_history_limit: int
+    freshness_limit_seconds: int
+
+
+@dataclass(frozen=True)
 class StockRadarConfig:
     version: int
     fallback: FallbackConfig
     critical: CriticalConfig
     confidence: ConfidenceConfig
     qa: QAConfig
+    runtime: RuntimeConfig
 
 
 def _weights(raw: dict[str, Any], name: str) -> dict[str, float]:
@@ -72,6 +81,7 @@ def load_stock_radar_config(path: Path | str = CONFIG_PATH) -> StockRadarConfig:
     critical = raw["critical"]
     confidence = raw["confidence"]
     qa = raw["qa"]
+    runtime = raw["runtime"]
     levels = confidence["portfolio_levels"]
     result = StockRadarConfig(
         version=int(raw["version"]),
@@ -104,6 +114,12 @@ def load_stock_radar_config(path: Path | str = CONFIG_PATH) -> StockRadarConfig:
             ),
             auto_update_production_weights=bool(_value(qa, "auto_update_production_weights")),
         ),
+        runtime=RuntimeConfig(
+            minute_history_limit=int(_value(runtime, "minute_history_limit")),
+            history_lookback_days=int(_value(runtime, "history_lookback_days")),
+            daily_history_limit=int(_value(runtime, "daily_history_limit")),
+            freshness_limit_seconds=int(_value(runtime, "freshness_limit_seconds")),
+        ),
     )
     if min(vars(result.fallback).values()) <= 0 or min(vars(result.critical).values()) <= 0:
         raise ValueError("fallback and critical thresholds must be positive")
@@ -116,4 +132,12 @@ def load_stock_radar_config(path: Path | str = CONFIG_PATH) -> StockRadarConfig:
         raise ValueError("weight-candidate sample minimum cannot be smaller than QA window")
     if result.qa.auto_update_production_weights:
         raise ValueError("Stock Radar V2 forbids automatic production-weight updates")
+    if result.runtime.minute_history_limit < 60:
+        raise ValueError("runtime minute history must include at least 60 bars")
+    if (
+        result.runtime.history_lookback_days <= 0
+        or result.runtime.daily_history_limit < 20
+        or result.runtime.freshness_limit_seconds <= 0
+    ):
+        raise ValueError("runtime daily history and freshness defaults must be positive and usable")
     return result
