@@ -4,6 +4,11 @@ Stock Radar V2 adds reliability, risk gating, and validation around the
 read-only MarketDataAdapter V1 facts. It remains a research system: it does not
 place orders or turn QA observations into trading instructions.
 
+The next validation-infrastructure stage is governed by the separate
+[Strategy Lab V0.1 Spec Freeze](strategy-lab-v0.1-spec-freeze.md). The current
+MVP supplies prerequisites only; it must not be described as already
+implementing the frozen Strategy Lab engines or adversarial suite.
+
 ## Provider stability and Critical health
 
 The primary provider enters fallback after three consecutive failures. It can
