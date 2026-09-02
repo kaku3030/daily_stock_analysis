@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] Stock Radar V2 新增多周期技术状态点时快照、稳定分类指纹与相邻 run 变化检测；忽略指标数值小幅漂移，并保持不通知、不调权、不生成 Confirmed signal。
 - [改进] Stock Radar V2 新增实时行情快照到现有 Daily/1H/15m 技术状态分析器的只读桥接；保留 forming/missing/blocked 数据质量限制，不生成 Confirmed signal 或交易指令。
 - [改进] Stock Radar V2 接入现有 NotificationService/Telegram 与 stateful SQLite；每日生成 QA 报告、周一生成 Calibration 人工复核报告，真实告警仍需显式开启，研究候选不会被自动标记为 Confirmed signal。
 - [新功能] 新增 Stock Radar V2 MVP：配置化 provider fallback 防抖与 Critical 健康状态机、独立 signal/portfolio confidence、L3 `BLOCK_NEW_POSITION` 风险门禁、统一雷达通知出口，以及持久化 Validation Queue、Daily QA、Weekly Calibration 人工复核基础结构；不修改单标的 Signal 状态，不自动修改生产权重，不包含交易执行。
