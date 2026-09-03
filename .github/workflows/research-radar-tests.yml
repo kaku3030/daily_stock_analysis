@@ -93,6 +93,7 @@ jobs:
             tests/test_stock_radar_v2_validation.py \
             tests/test_strategy_lab_hard_gates.py \
             tests/test_strategy_lab_adversarial.py \
+            tests/test_strategy_lab_parameter_stability.py \
             tests/test_run_stock_radar_qa.py \
             tests/test_run_stock_radar_technical_state.py
 

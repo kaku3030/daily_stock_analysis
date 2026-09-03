@@ -1,0 +1,59 @@
+version: 1
+introduced_in: strategy_lab_v0.1_parameter_stability
+last_changed: 2026-09-02
+
+parameter_stability:
+  minimum_neighborhood_size:
+    value: 3
+    reason: A cliff or plateau cannot be distinguished from noise with fewer than three observed parameter points.
+    evidence: TASK_BRIEF Parameter Stability Engine, sparse-neighborhood requirement.
+    introduced_in: strategy_lab_v0.1_parameter_stability
+    last_changed: 2026-09-02
+  plateau_relative_tolerance:
+    value: 0.85
+    reason: A point is treated as part of selected/base's local performance plateau only when its relative gap from the base metric -- |value-base|/|base| -- is at most (1 - tolerance). This is a symmetric magnitude comparison, not a one-sided "not much worse than base" floor and not sign/direction-oriented, so a point dramatically better than base (e.g. a distant unrelated best observation) is excluded exactly like a point dramatically worse, and MAXIMIZE/MINIMIZE always agree on plateau membership for the same numeric surface. Measured against the selected point, not the neighborhood's global best.
+    evidence: Matches the RADAR_ENGINEERING_CONSTITUTION stable-plateau illustration (17/20/22/25-period CAGR staying close to the 20-period peak). Initial V0.1 heuristic, not empirically calibrated against real backtest data; requires calibration evidence before change.
+    introduced_in: strategy_lab_v0.1_parameter_stability
+    last_changed: 2026-09-02
+  plateau_absolute_tolerance:
+    value: 0.02
+    reason: Serves two roles, both magnitude-only (no direction/sign involved). (1) The near-zero cutoff -- when |base| itself is at most this value, a relative gap is undefined/unstable (near-zero denominator), so plateau membership falls back entirely to this absolute gap (|base - value| <= tolerance) instead of the ratio-based comparison. (2) In that fallback, it is also the absolute closeness threshold applied to every point.
+    evidence: Guards the flat-weak-surface and negative-metric adversarial cases. Initial V0.1 heuristic, not empirically calibrated against real backtest data; requires calibration evidence before change.
+    introduced_in: strategy_lab_v0.1_parameter_stability
+    last_changed: 2026-09-02
+  minimum_plateau_width:
+    value: 2
+    reason: A single point can never be a plateau by definition; at least two contiguous in-tolerance points are required before the surface counts as broad.
+    evidence: RADAR_ENGINEERING_CONSTITUTION section 16, isolated peak vs. broad neighborhood distinction.
+    introduced_in: strategy_lab_v0.1_parameter_stability
+    last_changed: 2026-09-02
+  plateau_score_saturation_width:
+    value: 4
+    reason: The contiguous local plateau width (around selected) that earns full credit toward stability_score. Deliberately a fixed count, not a fraction of the total observation grid -- stability_score must depend only on selected's own local neighborhood, so appending unrelated distant observations elsewhere in the grid cannot change selected's score or label (locality invariance).
+    evidence: Matches the width of the RADAR_ENGINEERING_CONSTITUTION stable-plateau illustration (17/20/22/25-period, 4 points). Initial V0.1 heuristic, not empirically calibrated against real backtest data; requires calibration evidence before change.
+    introduced_in: strategy_lab_v0.1_parameter_stability
+    last_changed: 2026-09-02
+  cliff_relative_drop_threshold:
+    value: 0.5
+    reason: An adjacent parameter step that erases at least half of the selected point's edge (normalized by the local adjacent-neighbor scale, not the full neighborhood) is treated as a parameter cliff.
+    evidence: Matches the constitution's 19/20/21-period single-point-overfit illustration. Initial V0.1 heuristic, not empirically calibrated against real backtest data; requires calibration evidence before change.
+    introduced_in: strategy_lab_v0.1_parameter_stability
+    last_changed: 2026-09-02
+  cliff_minimum_scale:
+    value: 0.0001
+    reason: Floor for the cliff-normalization denominator so near-zero selected metrics or near-zero dispersion cannot produce a division-by-zero or an exaggerated cliff ratio.
+    evidence: Numerical-stability requirement, no strategy-specific meaning.
+    introduced_in: strategy_lab_v0.1_parameter_stability
+    last_changed: 2026-09-02
+  stability_score_stable_floor:
+    value: 0.75
+    reason: Stability score at or above this floor, combined with a broad plateau and no cliff, is labeled a stable plateau.
+    evidence: Initial V0.1 heuristic, not empirically calibrated against real backtest data; requires calibration evidence before change.
+    introduced_in: strategy_lab_v0.1_parameter_stability
+    last_changed: 2026-09-02
+  stability_score_fragile_ceiling:
+    value: 0.35
+    reason: Stability score below this ceiling is labeled fragile even without a detected cliff, since the plateau covers too little of the neighborhood.
+    evidence: Initial V0.1 heuristic, not empirically calibrated against real backtest data; requires calibration evidence before change.
+    introduced_in: strategy_lab_v0.1_parameter_stability
+    last_changed: 2026-09-02

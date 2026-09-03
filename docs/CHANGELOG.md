@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] Strategy Lab V0.1 新增 Parameter Stability Engine 基础实现，评估参数邻域的 Plateau 宽度与相邻参数悬崖比例并给出 stability_label；阈值全部来自新增 `strategy_lab_validation.yaml`（沿用 stock_radar_v2 的 value/reason/evidence 配置约定），不读取 PerformanceReport，不对"是否盈利"做判断，也未接入 Hard Gate pipeline，现有 `assess_parameter_stability` 永久对抗回归检查保持不变。
 - [测试] Strategy Lab V0.1 新增永久对抗回归套件，固定拦截未来数据、参数过拟合、收益集中、成本脆弱和 Beta 伪装 Alpha 五类坏策略，并将套件显式接入 Research Radar CI；任一坏样本漏检都会使检查失败。
 - [新功能] Strategy Lab V0.1 新增彼此隔离的 Validation/Performance 报告契约与固定顺序、首错即停的 Hard Gate 基础管线；业绩指标不能覆盖验证失败，尚不包含具体策略检查或回测能力。
 - [文档] 冻结 Strategy Lab V0.1 规格，明确 Validation/Performance 隔离、Hard Gate、永久对抗回归测试、实现顺序、现有 Stock Radar 前置能力映射及研究专用边界。
