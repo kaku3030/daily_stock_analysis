@@ -1,6 +1,6 @@
-version: 1
+version: 2
 introduced_in: strategy_lab_v0.1_parameter_stability
-last_changed: 2026-09-02
+last_changed: 2026-09-03
 
 parameter_stability:
   minimum_neighborhood_size:
@@ -57,3 +57,65 @@ parameter_stability:
     evidence: Initial V0.1 heuristic, not empirically calibrated against real backtest data; requires calibration evidence before change.
     introduced_in: strategy_lab_v0.1_parameter_stability
     last_changed: 2026-09-02
+
+edge_concentration:
+  minimum_trade_count:
+    value: 20
+    reason: Below this total trade count (winners and losers combined), the sample is too thin to trust any concentration conclusion, regardless of win/loss split.
+    evidence: Initial V0.1 heuristic -- not empirically calibrated against real backtest data; requires calibration evidence before change.
+    introduced_in: strategy_lab_v0.1_edge_concentration
+    last_changed: 2026-09-03
+  minimum_positive_trade_count:
+    value: 5
+    reason: Below this winning-trade count, Top-N%/HHI concentration figures are not statistically meaningful even if minimum_trade_count is satisfied (e.g. a low-win-rate strategy with many total trades but very few winners).
+    evidence: Initial V0.1 heuristic -- not empirically calibrated against real backtest data; requires calibration evidence before change.
+    introduced_in: strategy_lab_v0.1_edge_concentration
+    last_changed: 2026-09-03
+  minimum_metadata_coverage:
+    value: 0.80
+    reason: Positive-PnL-weighted symbol/sector/regime coverage (known_metadata_positive_pnl / GrossPositivePnL) must reach this fraction before that dimension is trusted enough to enter the Fragility Score or report an official concentration figure; below it, the dimension is reported as unavailable, never as zero risk.
+    evidence: Initial V0.1 heuristic -- not empirically calibrated against real backtest data; requires calibration evidence before change.
+    introduced_in: strategy_lab_v0.1_edge_concentration
+    last_changed: 2026-09-03
+  top_fraction_small:
+    value: 0.01
+    reason: Defines "Top 1%" -- the population is positive_trade_count only (max(1, ceil(positive_trade_count * fraction))), so appending zero/negative-PnL padding trades cannot inflate this population and dilute the reported concentration.
+    evidence: Matches the constitution's named "Top 1% Trades Contribution" metric. Initial V0.1 heuristic -- not empirically calibrated against real backtest data; requires calibration evidence before change.
+    introduced_in: strategy_lab_v0.1_edge_concentration
+    last_changed: 2026-09-03
+  top_fraction_large:
+    value: 0.05
+    reason: Defines "Top 5%" using the same positive_trade_count population and padding-resistant sizing as top_fraction_small.
+    evidence: Matches the constitution's named "Top 5% Trades Contribution" metric. Initial V0.1 heuristic -- not empirically calibrated against real backtest data; requires calibration evidence before change.
+    introduced_in: strategy_lab_v0.1_edge_concentration
+    last_changed: 2026-09-03
+  top_months_window:
+    value: 3
+    reason: Number of highest-contributing calendar months summed for the "Top 3 Months" evidence metric.
+    evidence: Matches the constitution's named "Top 3 Months" metric. Structural/definitional, not a calibrated threshold.
+    introduced_in: strategy_lab_v0.1_edge_concentration
+    last_changed: 2026-09-03
+  top_symbols_count:
+    value: 5
+    reason: Number of highest-contributing symbols summed for the "Top 5 Symbols" evidence metric.
+    evidence: Matches the constitution's named "Top 5 Symbols" metric. Structural/definitional, not a calibrated threshold.
+    introduced_in: strategy_lab_v0.1_edge_concentration
+    last_changed: 2026-09-03
+  fragility_moderate_floor:
+    value: 0.25
+    reason: Fragility Score at or above this floor (and below fragility_concentrated_floor) is labeled MODERATE. Fragility Score is the max of normalized HHI across trade/month/symbol and eligible sector/regime dimensions -- Top-N%/Top-symbol/Top-sector/Top-regime contribution ratios remain explanatory evidence only and never feed this score directly.
+    evidence: Initial V0.1 heuristic -- not empirically calibrated against real backtest data; requires calibration evidence before change.
+    introduced_in: strategy_lab_v0.1_edge_concentration
+    last_changed: 2026-09-03
+  fragility_concentrated_floor:
+    value: 0.50
+    reason: Fragility Score at or above this floor (and below fragility_extreme_floor) is labeled CONCENTRATED.
+    evidence: Initial V0.1 heuristic -- not empirically calibrated against real backtest data; requires calibration evidence before change.
+    introduced_in: strategy_lab_v0.1_edge_concentration
+    last_changed: 2026-09-03
+  fragility_extreme_floor:
+    value: 0.75
+    reason: Fragility Score at or above this floor is labeled EXTREME.
+    evidence: Initial V0.1 heuristic -- not empirically calibrated against real backtest data; requires calibration evidence before change.
+    introduced_in: strategy_lab_v0.1_edge_concentration
+    last_changed: 2026-09-03

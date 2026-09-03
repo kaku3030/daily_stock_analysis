@@ -51,7 +51,7 @@ initial test subjects for the validation system, not validated strategies.
 | `SLV01-002` | Hard Gate before expensive work | Logic, causality, look-ahead, and execution checks run before parameter scans, stress tests, or walk-forward work. |
 | `SLV01-003` | No averaging across Hard Gates | One Hard Gate failure makes the validation result fail regardless of soft scores or performance. |
 | `SLV01-004` | Parameter Stability Engine | Evaluates nearby parameter values and exposes cliffs; it is not tied to one strategy. |
-| `SLV01-005` | Edge Concentration Engine | Measures contribution by time, trade, asset, sector when available, and market regime using trade records rather than strategy-specific logic. |
+| `SLV01-005` | Edge Concentration Engine | Measures contribution by time and trade unconditionally, plus symbol/asset, sector, and market regime when their metadata coverage is sufficient, using trade records rather than strategy-specific logic. |
 | `SLV01-006` | Cost and execution realism | Tests fees, slippage/spread assumptions, execution causality, and sensitivity to increased cost. |
 | `SLV01-007` | OOS and walk-forward | Separates training/selection data from evaluation data and forbids look-ahead between windows. |
 | `SLV01-008` | Benchmark and alpha | Compares with a declared benchmark and exposes beta/exposure so market beta is not presented as alpha. |
@@ -128,7 +128,7 @@ Strategy Lab delivery status:
 | Ordered, fail-closed Hard Gate pipeline | Implemented foundation |
 | Soft Gate pipeline | Planned |
 | Parameter Stability Engine | Implemented — Foundation |
-| Edge Concentration Engine | Planned |
+| Edge Concentration Engine | Implemented — Foundation |
 | Permanent five-fixture adversarial suite | Implemented |
 | Cost/execution stress, OOS/walk-forward, benchmark/alpha, and regime checks | Planned |
 | Component attribution | Planned |
@@ -160,6 +160,40 @@ it is not yet wired into `HardGatePipeline` as a Soft Gate, and the existing
 `assess_parameter_stability` adversarial-suite check in
 `adversarial_checks.py` is unchanged and remains the permanent regression
 fixture for the `parameter_overfit` case.
+
+The Edge Concentration Engine foundation lives in
+`src/services/strategy_lab/edge_concentration.py`, with its thresholds in
+the same `strategy_lab_validation.yaml` (an `edge_concentration` section
+alongside `parameter_stability`). It evaluates a caller-supplied sequence of
+trade records and reports concentration across the trade, month, symbol,
+sector, and regime dimensions. The frozen minimal input is only
+`timestamp` + `pnl` per trade -- `symbol`, `sector`, and `regime` are all
+optional dimension metadata, not required fields. Every ratio is measured
+against Gross Positive PnL (winning trades only, never net PnL), and every
+"Top N%" population is sized off the winning-trade count alone, so padding
+the input with zero- or negative-PnL trades cannot dilute a reported
+concentration. Fragility Score is the max of normalized HHI across the
+always-computed trade/month dimensions and the metadata-coverage-eligible
+symbol/sector/regime dimensions -- a weakest-link aggregation; the named
+Top-1%/Top-5%/Top-month/Top-3-months/Top-symbol/Top-5-symbols/Top-sector/
+Top-regime contribution ratios remain explanatory evidence only and never
+feed the score. Missing symbol/sector/regime metadata is never folded into
+a synthetic scored bucket or treated as zero risk: it is reported
+separately (`symbol_missing_positive_pnl_share` /
+`sector_missing_positive_pnl_share` / `regime_missing_positive_pnl_share`),
+and when positive-PnL-weighted coverage for that dimension falls below the
+configured minimum, only that dimension's official contribution/HHI
+figures come back `None` ("unavailable") with an explicit warning -- never
+a falsely reassuring low number computed from a handful of known trades --
+and trade/month concentration (and any other dimension that does clear its
+coverage gate) keeps scoring normally rather than being blocked. It never
+reads `PerformanceReport` fields and makes no claim about whether a
+diversified edge is profitable. It is a standalone, reusable analysis
+module today -- it is not yet wired into `HardGatePipeline` as a Soft Gate,
+and the existing `assess_edge_concentration` adversarial-suite check in
+`adversarial_checks.py` (a simpler net-PnL-denominated gate) is unchanged
+and remains the permanent regression fixture for the `concentrated_edge`
+case.
 
 ## Explicit non-goals
 
