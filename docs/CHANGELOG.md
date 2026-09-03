@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] Strategy Lab V0.1 新增 Edge Concentration Engine 基础实现，评估交易在 trade/month/symbol/sector/regime 维度的集中度；冻结最小输入契约仅为 timestamp + pnl，symbol/sector/regime 均为可选维度元数据，而非必填字段。集中度分母统一使用 Gross Positive PnL（仅盈利交易之和，不用 Net PnL），Top N% 的分位人数基于盈利交易数计算，零/亏损交易填充不会稀释集中度；Fragility Score 取始终计算的 trade/month 维度，及元数据覆盖率达标的 symbol/sector/regime 各维度 normalized HHI 的最大值（weakest-link，不取平均），Top 1%/5%/Top Month/Top 3 Months/Top Symbol/Top 5 Symbols/Top Sector/Top Regime 贡献比例仅作为解释性 evidence，不直接参与打分。symbol/sector/regime 三者均采用相同的 positive-PnL-weighted metadata coverage gate：缺失该维度元数据的 positive PnL 占比单独报告（`symbol_missing_positive_pnl_share` / `sector_missing_positive_pnl_share` / `regime_missing_positive_pnl_share`），既不建立 synthetic missing bucket 也不按零风险处理；覆盖率不足时只使该维度的正式 contribution/HHI 指标返回 unavailable（None）并显式告警，不阻断 trade/month（及其余已达标维度）的正常计算。不读取 PerformanceReport，不接入 Hard/Soft Gate pipeline，现有 `assess_edge_concentration` 永久对抗回归检查（Net PnL 口径）保持不变。
 - [新功能] Strategy Lab V0.1 新增 Parameter Stability Engine 基础实现，评估参数邻域的 Plateau 宽度与相邻参数悬崖比例并给出 stability_label；阈值全部来自新增 `strategy_lab_validation.yaml`（沿用 stock_radar_v2 的 value/reason/evidence 配置约定），不读取 PerformanceReport，不对"是否盈利"做判断，也未接入 Hard Gate pipeline，现有 `assess_parameter_stability` 永久对抗回归检查保持不变。
 - [测试] Strategy Lab V0.1 新增永久对抗回归套件，固定拦截未来数据、参数过拟合、收益集中、成本脆弱和 Beta 伪装 Alpha 五类坏策略，并将套件显式接入 Research Radar CI；任一坏样本漏检都会使检查失败。
 - [新功能] Strategy Lab V0.1 新增彼此隔离的 Validation/Performance 报告契约与固定顺序、首错即停的 Hard Gate 基础管线；业绩指标不能覆盖验证失败，尚不包含具体策略检查或回测能力。

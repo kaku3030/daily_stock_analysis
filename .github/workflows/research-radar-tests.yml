@@ -94,6 +94,7 @@ jobs:
             tests/test_strategy_lab_hard_gates.py \
             tests/test_strategy_lab_adversarial.py \
             tests/test_strategy_lab_parameter_stability.py \
+            tests/test_strategy_lab_edge_concentration.py \
             tests/test_run_stock_radar_qa.py \
             tests/test_run_stock_radar_technical_state.py
 

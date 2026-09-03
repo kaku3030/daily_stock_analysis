@@ -62,9 +62,56 @@ class ParameterStabilityConfig:
 
 
 @dataclass(frozen=True)
+class EdgeConcentrationConfig:
+    minimum_trade_count: int
+    minimum_positive_trade_count: int
+    minimum_metadata_coverage: float
+    top_fraction_small: float
+    top_fraction_large: float
+    top_months_window: int
+    top_symbols_count: int
+    fragility_moderate_floor: float
+    fragility_concentrated_floor: float
+    fragility_extreme_floor: float
+
+    def __post_init__(self) -> None:
+        if self.minimum_trade_count < 1:
+            raise ValueError("minimum_trade_count must be at least 1")
+        if self.minimum_positive_trade_count < 1:
+            raise ValueError("minimum_positive_trade_count must be at least 1")
+        if self.minimum_trade_count < self.minimum_positive_trade_count:
+            raise ValueError(
+                "minimum_trade_count must be at least minimum_positive_trade_count"
+            )
+        if not (0 < self.minimum_metadata_coverage <= 1):
+            raise ValueError("minimum_metadata_coverage must be in (0, 1]")
+        if not (0 < self.top_fraction_small <= 1):
+            raise ValueError("top_fraction_small must be in (0, 1]")
+        if not (0 < self.top_fraction_large <= 1):
+            raise ValueError("top_fraction_large must be in (0, 1]")
+        if self.top_fraction_small > self.top_fraction_large:
+            raise ValueError("top_fraction_small must be at most top_fraction_large")
+        if self.top_months_window < 1:
+            raise ValueError("top_months_window must be at least 1")
+        if self.top_symbols_count < 1:
+            raise ValueError("top_symbols_count must be at least 1")
+        if not (
+            0 <= self.fragility_moderate_floor
+            < self.fragility_concentrated_floor
+            < self.fragility_extreme_floor
+            <= 1
+        ):
+            raise ValueError(
+                "fragility thresholds must satisfy "
+                "0 <= moderate_floor < concentrated_floor < extreme_floor <= 1"
+            )
+
+
+@dataclass(frozen=True)
 class StrategyLabValidationConfig:
     version: int
     parameter_stability: ParameterStabilityConfig
+    edge_concentration: EdgeConcentrationConfig
 
 
 def load_strategy_lab_validation_config(
@@ -72,6 +119,7 @@ def load_strategy_lab_validation_config(
 ) -> StrategyLabValidationConfig:
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     section = raw["parameter_stability"]
+    edge_section = raw["edge_concentration"]
     return StrategyLabValidationConfig(
         version=int(raw["version"]),
         parameter_stability=ParameterStabilityConfig(
@@ -85,6 +133,18 @@ def load_strategy_lab_validation_config(
             stability_score_stable_floor=float(_value(section, "stability_score_stable_floor")),
             stability_score_fragile_ceiling=float(_value(section, "stability_score_fragile_ceiling")),
         ),
+        edge_concentration=EdgeConcentrationConfig(
+            minimum_trade_count=int(_value(edge_section, "minimum_trade_count")),
+            minimum_positive_trade_count=int(_value(edge_section, "minimum_positive_trade_count")),
+            minimum_metadata_coverage=float(_value(edge_section, "minimum_metadata_coverage")),
+            top_fraction_small=float(_value(edge_section, "top_fraction_small")),
+            top_fraction_large=float(_value(edge_section, "top_fraction_large")),
+            top_months_window=int(_value(edge_section, "top_months_window")),
+            top_symbols_count=int(_value(edge_section, "top_symbols_count")),
+            fragility_moderate_floor=float(_value(edge_section, "fragility_moderate_floor")),
+            fragility_concentrated_floor=float(_value(edge_section, "fragility_concentrated_floor")),
+            fragility_extreme_floor=float(_value(edge_section, "fragility_extreme_floor")),
+        ),
     )
 
 
@@ -92,3 +152,9 @@ def load_parameter_stability_config(path: Path | str = CONFIG_PATH) -> Parameter
     """Convenience accessor for callers that only need the parameter-stability section."""
 
     return load_strategy_lab_validation_config(path).parameter_stability
+
+
+def load_edge_concentration_config(path: Path | str = CONFIG_PATH) -> EdgeConcentrationConfig:
+    """Convenience accessor for callers that only need the edge-concentration section."""
+
+    return load_strategy_lab_validation_config(path).edge_concentration
