@@ -1,4 +1,4 @@
-version: 2
+version: 3
 introduced_in: strategy_lab_v0.1_parameter_stability
 last_changed: 2026-09-03
 
@@ -118,4 +118,48 @@ edge_concentration:
     reason: Fragility Score at or above this floor is labeled EXTREME.
     evidence: Initial V0.1 heuristic -- not empirically calibrated against real backtest data; requires calibration evidence before change.
     introduced_in: strategy_lab_v0.1_edge_concentration
+    last_changed: 2026-09-03
+
+execution_stress:
+  minimum_trade_count:
+    value: 20
+    reason: Below this total trade count, the sample is too thin to trust an aggregate cost/delay retention conclusion.
+    evidence: Initial V0.1 heuristic -- not empirically calibrated against real backtest data; requires calibration evidence before change.
+    introduced_in: strategy_lab_v0.1_execution_stress
+    last_changed: 2026-09-03
+  cost_multipliers:
+    value: [1.0, 1.5, 2.0]
+    reason: The frozen cost-stress scenario axis (1x/1.5x/2x fees and slippage). 1.0 is the mandatory realistic reference multiplier, not a zero-friction fantasy baseline.
+    evidence: TASK_BRIEF Cost / Execution Stress Test Foundation, frozen scenario matrix.
+    introduced_in: strategy_lab_v0.1_execution_stress
+    last_changed: 2026-09-03
+  delay_levels:
+    value: [0, 1, 2]
+    reason: The frozen delay-stress scenario axis (0/+1/+2 bar fill delay). 0 is the mandatory reference delay every observation must supply.
+    evidence: TASK_BRIEF Cost / Execution Stress Test Foundation, frozen scenario matrix.
+    introduced_in: strategy_lab_v0.1_execution_stress
+    last_changed: 2026-09-03
+  minimum_delay_price_coverage:
+    value: 0.80
+    reason: Absolute-baseline-gross-PnL-weighted coverage (Sigma|baseline gross pnl| for trades with a price point at this delay / Sigma|baseline gross pnl| total) must reach this fraction before a delay level's scenarios are trusted; below it, every scenario at that delay level is reported unavailable, never computed from a shrunken, survivorship-biased remainder.
+    evidence: Initial V0.1 heuristic -- not empirically calibrated against real backtest data; requires calibration evidence before change.
+    introduced_in: strategy_lab_v0.1_execution_stress
+    last_changed: 2026-09-03
+  fragile_retention_floor:
+    value: 0.25
+    reason: Worst-case scenario retention at or above this floor (and below moderate_retention_floor) is labeled EXTREME below it, FRAGILE at or above it.
+    evidence: Initial V0.1 heuristic -- not empirically calibrated against real backtest data; requires calibration evidence before change.
+    introduced_in: strategy_lab_v0.1_execution_stress
+    last_changed: 2026-09-03
+  moderate_retention_floor:
+    value: 0.50
+    reason: Worst-case scenario retention at or above this floor (and below robust_retention_floor) is labeled MODERATE.
+    evidence: Initial V0.1 heuristic -- not empirically calibrated against real backtest data; requires calibration evidence before change.
+    introduced_in: strategy_lab_v0.1_execution_stress
+    last_changed: 2026-09-03
+  robust_retention_floor:
+    value: 0.75
+    reason: Worst-case scenario retention at or above this floor is labeled ROBUST.
+    evidence: Initial V0.1 heuristic -- not empirically calibrated against real backtest data; requires calibration evidence before change.
+    introduced_in: strategy_lab_v0.1_execution_stress
     last_changed: 2026-09-03

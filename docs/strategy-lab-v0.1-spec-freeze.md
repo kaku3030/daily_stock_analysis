@@ -130,7 +130,8 @@ Strategy Lab delivery status:
 | Parameter Stability Engine | Implemented — Foundation |
 | Edge Concentration Engine | Implemented — Foundation |
 | Permanent five-fixture adversarial suite | Implemented |
-| Cost/execution stress, OOS/walk-forward, benchmark/alpha, and regime checks | Planned |
+| Cost/execution stress | Implemented — Foundation |
+| OOS/walk-forward, benchmark/alpha, and regime checks | Planned |
 | Component attribution | Planned |
 | Breakout/retest/Chandelier experiment | Deferred until validation infrastructure exists |
 
@@ -194,6 +195,82 @@ and the existing `assess_edge_concentration` adversarial-suite check in
 `adversarial_checks.py` (a simpler net-PnL-denominated gate) is unchanged
 and remains the permanent regression fixture for the `concentrated_edge`
 case.
+
+The Cost / Execution Stress Test Foundation lives in
+`src/services/strategy_lab/execution_stress.py`, with its thresholds in the
+same `strategy_lab_validation.yaml` (an `execution_stress` section). It
+answers a Signal-Edge-vs-Execution-Edge question: if commissions are
+higher, entry/exit price slippage (including spread) is worse, or fills
+are delayed by one or two bars, than assumed, how much of the strategy's
+already-realized edge survives? Each trade's minimal input is `side` +
+`quantity` + signal timestamps + a mandatory delay-0
+`ExecutionPricePoint.reference_price` pair (a causal, executable,
+pre-slippage price -- the engine, not the caller, applies slippage on top
+of it); the engine computes `gross_pnl = side_sign * (exit_price -
+entry_price) * quantity` and `net_pnl = gross_pnl - cost` itself rather
+than accepting a caller-supplied PnL, and `quantity` is a required,
+explicit, positive unit-conversion input, never inferred from price
+movement -- it is used identically across every scenario for a given trade
+and never compared or ranked across trades, which is what keeps it out of
+Position Sizing Engine territory. Fee (`baseline_fee_cost`, explicit
+monetary commission/fees only, full stop -- a PnL-currency amount, scaled
+linearly by the cost multiplier) and price slippage (`baseline_entry_slippage_bps`
+/ `baseline_exit_slippage_bps` -- two *independently representable* rates,
+since entry and exit fills are not guaranteed to face the same friction,
+and this is also where bid-ask spread degradation belongs if not already
+reflected in `reference_price` -- each a basis-points rate, scaled the
+same way but applied to its own side's reference price in the direction
+that is actually adverse for the position's side -- LONG: `entry * (1 + k
+* entry_slip)` / `exit * (1 - k * exit_slip)`; SHORT: `entry * (1 - k *
+entry_slip)` / `exit * (1 + k * exit_slip)`) are modeled separately and
+must never double-count the same real-world friction, so a long/short
+sign bug in the fee dimension is structurally impossible (pure
+subtraction, no price math) and the sign-correctness risk is concentrated
+entirely, and deliberately, in the slippage direction formula. The
+scenario matrix is `{1.0, 1.5, 2.0}` cost multiplier x `{0, 1, 2}` bar
+delay (9 cells); `(1.0x, 0 bars)` is the *one* realistic reference
+execution -- delay-0 reference prices, 1x entry/exit slippage, 1x fee --
+not a zero-friction fantasy
+baseline, and every baseline/reference aggregate net PnL used anywhere in
+the module (the top-level eligibility gate, each delay level's own
+retention denominator, and the break-even solve) is derived from that same
+`(1.0x, 0 bars)` computation path -- never a second, independently
+implemented baseline formula. Retention at `(k, d)` is `stressed_net_pnl /
+reference_net_pnl`, computed over the *same* eligible cohort `C_d` (trades
+with a price point at delay `d`; `C_0` is every trade) on both sides --
+denominated only when that cohort's own reference-execution net PnL is
+positive; otherwise every scenario cell at that delay level is
+`retention=None` with a `delay_{d}_cohort_baseline_not_positive` warning,
+the same undefined-ratio reasoning as the top-level
+`NO_POSITIVE_BASELINE_EDGE` gate, just scoped to one delay level. A trade
+missing a delay-N price point is excluded from that delay level's cohort
+entirely -- both numerator and denominator -- never falling back to the
+baseline price and never measured against a denominator that still
+includes trades the numerator dropped; each non-zero delay level's
+*coverage* (a separate, prior gate) is measured as the fraction of
+*absolute* baseline gross PnL, over the full trade set, held by trades
+that do have a price point there, and below the configured minimum every
+scenario cell at that delay level is `retention=None` ("unavailable").
+Execution Fragility Score is `1 - clamp(worst_retention, 0, 1)`, where
+`worst_retention` is the minimum retention across every eligible scenario
+*cell* (the actual joint cost+delay combination, not the max of two
+independently-evaluated single axes) -- `worst_retention` itself is
+reported unclamped and may be negative. Break-even cost multiplier solves
+`A - k*F = 0` along the reference (delay-0) row, where `A` is the raw
+zero-friction gross PnL and `F` is total 1x friction (slippage loss plus
+fee) -- both derived from two evaluations of the same per-scenario
+computation (`cost_multiplier=0.0` and `1.0`) rather than a separately
+reimplemented formula, since slippage scales with the cost multiplier
+exactly like fee does and an earlier draft's `gross_at_k1 / fee_cost`
+implicitly (and incorrectly) held slippage frozen at its k=1 value.
+`ExecutionObservation.__post_init__` performs a structural,
+input-integrity causality check (an executable timestamp may not precede
+its signal timestamp; delay-N timestamps must be non-decreasing with N) --
+this is not a substitute for a future Hard Gate. It never reads
+`PerformanceReport` fields, is not wired into `HardGatePipeline`, and does
+not modify the Parameter Stability Engine, the Edge Concentration Engine,
+`adversarial_checks.py`, `hard_gates.py`, the Signal Engine, or the Data
+Layer.
 
 ## Explicit non-goals
 
