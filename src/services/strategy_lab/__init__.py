@@ -42,10 +42,22 @@ from .parameter_stability import (
     evaluate_parameter_stability,
 )
 from .performance_models import PerformanceReport
+from .validation_gate import (
+    SOFT_VALIDATION_SOURCES,
+    SoftValidationReport,
+    SoftValidationResult,
+    SoftValidationSource,
+    SoftValidationStatus,
+    aggregate_soft_validation,
+    soft_validation_from_edge_concentration,
+    soft_validation_from_execution_stress,
+    soft_validation_from_parameter_stability,
+)
 from .validation_models import GateResult, ValidationDecision, ValidationReport
 
 __all__ = [
     "HARD_GATE_ORDER",
+    "SOFT_VALIDATION_SOURCES",
     "EdgeConcentrationConfig",
     "EdgeConcentrationResult",
     "EdgeFragilityLabel",
@@ -65,11 +77,16 @@ __all__ = [
     "ParameterStabilityResult",
     "PerformanceReport",
     "PositionSide",
+    "SoftValidationReport",
+    "SoftValidationResult",
+    "SoftValidationSource",
+    "SoftValidationStatus",
     "StrategyLabValidationConfig",
     "StrategyValidationCase",
     "TradeObservation",
     "ValidationDecision",
     "ValidationReport",
+    "aggregate_soft_validation",
     "assess_benchmark_alpha",
     "assess_cost_robustness",
     "assess_edge_concentration",
@@ -82,4 +99,7 @@ __all__ = [
     "load_execution_stress_config",
     "load_parameter_stability_config",
     "load_strategy_lab_validation_config",
+    "soft_validation_from_edge_concentration",
+    "soft_validation_from_execution_stress",
+    "soft_validation_from_parameter_stability",
 ]

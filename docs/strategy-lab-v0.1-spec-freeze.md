@@ -126,7 +126,7 @@ Strategy Lab delivery status:
 | --- | --- |
 | Separate `ValidationReport` and `PerformanceReport` contracts | Implemented foundation |
 | Ordered, fail-closed Hard Gate pipeline | Implemented foundation |
-| Soft Gate pipeline | Planned |
+| Soft Gate pipeline | Implemented — Foundation |
 | Parameter Stability Engine | Implemented — Foundation |
 | Edge Concentration Engine | Implemented — Foundation |
 | Permanent five-fixture adversarial suite | Implemented |
@@ -271,6 +271,49 @@ this is not a substitute for a future Hard Gate. It never reads
 not modify the Parameter Stability Engine, the Edge Concentration Engine,
 `adversarial_checks.py`, `hard_gates.py`, the Signal Engine, or the Data
 Layer.
+
+The Soft Validation layer lives in
+`src/services/strategy_lab/validation_gate.py`. It is a second, independent
+evidence system that sits alongside Hard Validation without modifying it:
+`ValidationReport` / `HardGatePipeline` are unchanged, and a Hard `PASS`
+still means only that the experiment is eligible to continue validation --
+not that the strategy is validated. `SoftValidationStatus` has four levels
+(`ACCEPTABLE` / `CAUTION` / `FRAGILE` / `INCONCLUSIVE`); three adapters
+(`soft_validation_from_parameter_stability` /
+`soft_validation_from_edge_concentration` /
+`soft_validation_from_execution_stress`) each read *only* the
+corresponding Foundation engine's own frozen label field -- never a
+numeric score, retention ratio, or other PnL-derived value, so a
+contrived mismatch between a result's label and its score cannot change
+the mapped status. `SoftValidationReport` requires exactly one result from
+each of the three frozen `SoftValidationSource` values and fails closed
+(`ValueError`) on a missing, duplicate, or unknown source; its
+`overall_status` is re-derived and cross-checked against `results` in
+`__post_init__` as an invariant, so even a directly, inconsistently
+constructed report fails closed. Aggregation
+(`aggregate_soft_validation`) is a precedence pick over the *set* of
+per-source statuses -- `FRAGILE > INCONCLUSIVE > CAUTION > ACCEPTABLE`,
+deliberately no averaging, weighting, voting, or composite score, matching
+the "no averaging across gates" philosophy already frozen for Hard
+Validation -- and is therefore structurally order-invariant.
+`NO_POSITIVE_EDGE` / `NO_POSITIVE_BASELINE_EDGE` map to `INCONCLUSIVE`,
+not a Hard-Gate-style failure, mirroring how the Foundation engines
+themselves already separate "no trustworthy edge computable" from "the
+edge is bad". This module does not implement `logic_integrity`,
+`execution_causality`, or `execution_reality` -- those remain
+unimplemented Hard Gates reserved for separate briefs -- and in
+particular does not connect `execution_stress` to `execution_reality`:
+execution_stress measures robustness to fees/slippage/delay, a
+categorically different concern from causal/physical execution validity,
+and cost fragility is Soft Validation evidence, never a Hard
+execution-reality failure. It introduces no combined Hard+Soft report type
+and no higher-level "validated/promotable" promotion decision -- that
+remains out of scope for V0.1. It has no dependency on performance: it
+does not import `performance_models`, does not accept a
+`PerformanceReport`, and reads no CAGR/Sharpe/MaxDD/absolute-return field
+-- enforced by a permanent AST-based structural test rather than a raw
+string scan, since the module's own docstring explains this same
+boundary in prose.
 
 ## Explicit non-goals
 

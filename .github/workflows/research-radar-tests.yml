@@ -96,6 +96,7 @@ jobs:
             tests/test_strategy_lab_parameter_stability.py \
             tests/test_strategy_lab_edge_concentration.py \
             tests/test_strategy_lab_execution_stress.py \
+            tests/test_strategy_lab_validation_gate.py \
             tests/test_run_stock_radar_qa.py \
             tests/test_run_stock_radar_technical_state.py
 
