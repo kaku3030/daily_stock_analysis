@@ -131,6 +131,7 @@ Strategy Lab delivery status:
 | Edge Concentration Engine | Implemented — Foundation |
 | Permanent five-fixture adversarial suite | Implemented |
 | Cost/execution stress | Implemented — Foundation |
+| Experiment governance (manifest, parameter origin, lineage audit) | Implemented — Foundation |
 | OOS/walk-forward, benchmark/alpha, and regime checks | Planned |
 | Component attribution | Planned |
 | Breakout/retest/Chandelier experiment | Deferred until validation infrastructure exists |
@@ -314,6 +315,78 @@ does not import `performance_models`, does not accept a
 -- enforced by a permanent AST-based structural test rather than a raw
 string scan, since the module's own docstring explains this same
 boundary in prose.
+
+The Experiment Governance Foundation lives in
+`src/services/strategy_lab/experiment_governance.py`. It supplies the
+experiment identity, parameter provenance, and lineage-audit contracts that
+later Strategy Lab work needs in order to say *which* experiment produced a
+piece of evidence and *where its parameters came from*. `ExperimentManifest`
+carries an open `governed_components` mapping of caller-supplied component
+fingerprints, and its `manifest_hash` is
+`SHA256(canonical(schema_version + governed_components))`. Identity and
+timestamp fields (`experiment_id`, `parent_experiment_id`,
+`root_experiment_id`, `created_at`) are excluded **structurally** — the
+canonicalizer only ever receives the governed subset, so no future identity
+field can be silently swept into the hash the way a denylist would allow.
+`RECOGNIZED_GOVERNED_COMPONENTS` is advisory only: unknown component keys
+stay valid and are surfaced through `unrecognized_component_keys` purely for
+typo visibility, and there is deliberately no anti-shrink test over that key
+set, because governance coverage is expected to grow. Canonicalization is
+intentionally narrow rather than a general JSON framework — non-string
+component keys or fingerprints are rejected outright rather than coerced.
+`ParameterOrigin` records FIXED-parameter provenance and enforces that
+`PRIOR_EXPERIMENT` requires an `origin_experiment_id` while
+`LITERATURE`/`MANUAL_PRIOR` prohibit one, and that
+`information_horizon_end <= declared_at`; its fingerprint covers all six
+provenance fields. `audit_experiment_lineage` returns an
+`ExperimentLineageAudit` whose verdict is `PASS`, `VIOLATION`, or
+`INDETERMINATE`, derived and cross-checked from structured
+`LineageViolation` records (`code`, `severity`, `message`, `evidence`)
+covering root invariants, child/root mismatch, self-parent, lineage cycles,
+missing parents, and duplicate experiment identity with a conflicting
+definition. Completeness is never inferred from the supplied history: the
+caller declares it through `LineageAuditContext.history_complete`, which is
+what separates a genuinely missing parent (`VIOLATION`) from one that simply
+was not supplied to the audit (`INDETERMINATE`). An `experiment_id` names
+exactly one manifest definition permanently, so the same id observed with a
+different definition is always a violation, independent of any OOS
+consumption state — this Foundation takes no OOS input at all. Governance
+datetimes must be timezone-aware and are canonicalized to UTC, with naive
+values rejected; this is deliberately stricter than the existing engines,
+which are not retrofitted. Its trust boundary is explicit: component
+fingerprints are caller-supplied trusted inputs, and `manifest_hash` proves
+only that a manifest is a consistent function of the fingerprints it was
+handed — never that those fingerprints faithfully represent the external
+component contents they describe. The module is pure compute and a leaf
+within the package: no persistence, no repository, no OOS ledger, no
+Walk-Forward folds, no PIT universe, no `PerformanceReport` dependency, and
+no change to the Hard or Soft validation pipelines.
+
+Three further contracts are frozen alongside the above:
+
+- **`governed_components` is stored as a read-only mapping.** Because it is
+  definition identity rather than diagnostics, neither mutation of the
+  caller's original mapping nor mutation through the manifest attribute may
+  change `manifest_hash` after construction. A private defensive copy alone
+  is insufficient — the stored mapping itself must reject mutation.
+  `manifest_hash` remains a derived read-only property, so it can be neither
+  injected at construction nor assigned afterwards.
+- **A conflicting duplicate `experiment_id` is an ambiguous, unresolvable
+  lineage node.** It must not be arbitrarily selected for parent/root
+  comparison, ancestor traversal, or cycle detection, since choosing one of
+  its definitions would make those conclusions depend on the order the
+  history happened to arrive in. The duplicate identity itself is reported
+  as a `VIOLATION`; any lineage claim blocked by that ambiguity is reported
+  separately at `INDETERMINATE` severity, so the audit declines to conclude
+  rather than guessing. The duplicate-identity evidence carries canonical
+  definition descriptors — manifest hash, parent identity, and root identity
+  — so a conflict whose definitions share a hash is still distinguishable.
+- **`unverifiable_claims` is a deterministic derived view.**
+  `ExperimentLineageAudit.unverifiable_claims` exposes exactly the
+  structured `INDETERMINATE` violations, derived from the canonically sorted
+  `violations` rather than maintained as a second independently updated
+  list, so calibrated abstention has one source of truth and inherits the
+  report's order invariance.
 
 ## Explicit non-goals
 

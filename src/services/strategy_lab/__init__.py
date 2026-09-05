@@ -33,6 +33,19 @@ from .execution_stress import (
     PositionSide,
     evaluate_execution_stress,
 )
+from .experiment_governance import (
+    RECOGNIZED_GOVERNED_COMPONENTS,
+    ExperimentLineageAudit,
+    ExperimentManifest,
+    LineageAuditContext,
+    LineageAuditVerdict,
+    LineageViolation,
+    LineageViolationCode,
+    LineageViolationSeverity,
+    ParameterOrigin,
+    ParameterOriginType,
+    audit_experiment_lineage,
+)
 from .hard_gates import HARD_GATE_ORDER, HardGatePipeline, StrategyValidationCase
 from .parameter_stability import (
     MetricDirection,
@@ -57,6 +70,7 @@ from .validation_models import GateResult, ValidationDecision, ValidationReport
 
 __all__ = [
     "HARD_GATE_ORDER",
+    "RECOGNIZED_GOVERNED_COMPONENTS",
     "SOFT_VALIDATION_SOURCES",
     "EdgeConcentrationConfig",
     "EdgeConcentrationResult",
@@ -68,10 +82,19 @@ __all__ = [
     "ExecutionScenarioResult",
     "ExecutionStressConfig",
     "ExecutionStressResult",
+    "ExperimentLineageAudit",
+    "ExperimentManifest",
     "GateResult",
     "HardGatePipeline",
+    "LineageAuditContext",
+    "LineageAuditVerdict",
+    "LineageViolation",
+    "LineageViolationCode",
+    "LineageViolationSeverity",
     "MetricDirection",
     "ParameterObservation",
+    "ParameterOrigin",
+    "ParameterOriginType",
     "ParameterStabilityConfig",
     "ParameterStabilityLabel",
     "ParameterStabilityResult",
@@ -92,6 +115,7 @@ __all__ = [
     "assess_edge_concentration",
     "assess_no_lookahead",
     "assess_parameter_stability",
+    "audit_experiment_lineage",
     "evaluate_edge_concentration",
     "evaluate_execution_stress",
     "evaluate_parameter_stability",
