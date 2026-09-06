@@ -132,6 +132,7 @@ Strategy Lab delivery status:
 | Permanent five-fixture adversarial suite | Implemented |
 | Cost/execution stress | Implemented — Foundation |
 | Experiment governance (manifest, parameter origin, lineage audit) | Implemented — Foundation |
+| Information dependency contract (warmup, purge, embargo, overlap) | Implemented — Foundation |
 | OOS/walk-forward, benchmark/alpha, and regime checks | Planned |
 | Component attribution | Planned |
 | Breakout/retest/Chandelier experiment | Deferred until validation infrastructure exists |
@@ -387,6 +388,150 @@ Three further contracts are frozen alongside the above:
   `violations` rather than maintained as a second independently updated
   list, so calibrated abstention has one source of truth and inherits the
   report's order invariance.
+
+The Information Dependency Contract Foundation lives in
+`src/services/strategy_lab/information_dependency.py`. It declares what
+information a strategy's features, labels, and state actually depend on, and
+derives the warmup, purge, embargo, and overlap obligations that follow. It
+answers "what would have to be true for this evidence to be causally clean",
+never "is this strategy profitable".
+
+`bar_grid_id` is an opaque exact-match identifier: a strict non-empty string,
+never normalized, alias-resolved, or interpreted. This module assigns no
+meaning to `"1m"`, `"15m"`, `"1d"`, `"daily"`, `"D"`, or any provider
+spelling, does not own the future bar-grid vocabulary, and does not depend on
+the several unrelated timeframe vocabularies that exist elsewhere in the
+repository. `FeatureSetDependency.evaluation_bar_grid_id` states the grid the
+strategy is actually evaluated on, and cross-grid detection compares each
+declared feature's own `bar_grid_id` against that declared evaluation grid —
+it does **not** infer "same grid" merely because every feature happens to
+agree with every other feature, so a single feature on grid A while evaluation
+happens on grid B is cross-grid. Because lookbacks on different bar grids live
+in different index spaces they are **never numerically compared** — not maxed,
+not summed, not ranked. Converting between grids needs a calendar this module
+deliberately does not own, so cross-grid warmup is
+`EXTERNAL_RESOLUTION_REQUIRED`: it leaves `feature_warmup_bars` and
+`required_warmup_bars` at `None`, sets `warmup_source=UNRESOLVED` and
+`calendar_resolution_required=True`, and on its own does **not** reduce
+completeness. `LIMITED_EXPRESSION` is reserved for a genuine schema capability
+gap — namely `AvailabilityLagKind.UNSUPPORTED`, something the vocabulary
+cannot express at all — as opposed to something expressed precisely that
+merely needs an external resolver.
+
+Declaration state is a wrapper, not a payload field. `DependencyDeclaration[T]`
+is the generic declaration-state wrapper — `status`, an optional `payload`, and
+an optional `reason` — while `InformationDependencyDeclaration` is the
+aggregate contract holding one wrapper per slot (`feature_set`, `label`,
+`state`, `overlap`). The payload dataclasses describe the dependency *itself*
+and never repeat declaration status, so "is this declared" and "what does it
+say" cannot drift apart. `FeatureDependencyDeclaration` is deliberately
+special-cased rather than wrapped generically, because a feature's identity
+must survive being undeclared: it mirrors the wrapper's
+`status`/`payload`/`reason` shape with `feature_id` added, so an undeclared
+feature is a named, stated fact rather than an absence inferred from a missing
+value. A `reason` may accompany either status — explaining a declared
+dependency is as legitimate as explaining a gap. The frozen `NOT_APPLICABLE` matrix is:
+label invalid, feature set valid with a non-empty reason, state invalid,
+overlap valid with a non-empty reason, and a single feature item invalid —
+only the set as a whole may be not applicable.
+
+`None` is never `0`. An undeclared quantity is unknown and poisons everything
+derived from it; a quantity declared not applicable is exactly zero and fully
+resolved. An `UNDECLARED` declaration may not carry placeholder payload and a
+`NOT_APPLICABLE` one must state a non-empty reason, so the two can never be
+confused by inspection. Feature set `UNDECLARED` leaves feature warmup unknown,
+`NOT_APPLICABLE` makes it exactly 0, and one `UNDECLARED` feature poisons the
+aggregate while keeping its identity in the report. Every feature tied at a
+grid's binding maximum is preserved. State `UNDECLARED` leaves state warmup
+unknown; `STATELESS` and `WARM_START` are 0; `COLD_START` contributes its
+declared convergence warmup. Either side being unresolved poisons the total
+required warmup. `warmup_source` is a single scalar — `FEATURE` when the
+feature side is strictly larger, `STATE` when the state side is, `BOTH` when
+they are equal and positive, `NONE` when both are zero, and `UNRESOLVED` when
+either side is unknown — never a tuple, list, or set; feature-level ties are
+preserved separately in `binding_feature_ids`. There is deliberately no
+aggregate "warmup unresolved" finding: warmup can be unresolved because a side
+is undeclared *or* because grids are not comparable, and those carry different
+categories, so inventing one aggregate category would misreport whichever case
+it did not match. An unresolved warmup is instead expressed structurally —
+`required_warmup_bars=None` with `warmup_source=UNRESOLVED` — while only the
+specific underlying findings are reported. Purge
+is driven by the label information horizon plus its availability lag and never
+by feature lookback — a feature looks backwards from a decision while a label
+reaches forwards past it — so a zero horizon with a zero lag derives a purge of
+exactly zero, which is a resolved answer rather than a missing one.
+`PurgeDerivation` is a structured diagnostic record — `label_horizon_bars`,
+`label_lag_kind`, `label_lag_bars`, `resolvable_in_bars` — never a verdict or
+driver label: when the label is undeclared its fields explicitly represent
+unavailable declaration facts rather than being omitted. Labels and
+state may never be declared `NOT_APPLICABLE`.
+
+Lookback and availability are orthogonal. A feature's `lookback_bars` and a
+label's `information_horizon_bars` are always plain non-negative bar counts —
+how far the dependency reaches through the bar grid is always expressible.
+Separately, each carries an `availability_lag` describing when the value can
+actually be known, and **only that lag** may be `BAR_COUNT`, `DURATION`, or
+`UNSUPPORTED`; a lookback is never itself a duration or unsupported, and an
+availability lag never poisons warmup. `feature_availability_requirements` are
+obligations rather than a census: only `DECLARED` features appear there, each
+with a concrete `bar_grid_id` and complete `AvailabilityLag` — kind, bars,
+duration, and note, not merely the kind. An undeclared feature is represented
+solely by its structured unresolved finding, so an obligation list never holds
+an entry whose obligation is unknown.
+
+Every unresolved finding carries an `UnresolvedCategory`, and that category
+alone drives completeness; there is no separate presentation-severity axis.
+Any `UNDECLARED` yields `INCOMPLETE`; otherwise any `LIMITED_EXPRESSION`
+yields `LIMITED_EXPRESSION`; otherwise `COMPLETE`.
+`EXTERNAL_RESOLUTION_REQUIRED` remains in the unresolved findings and never
+reduces completeness. A `DURATION` availability lag is exactly that case: it
+sets `calendar_resolution_required` and always emits an unresolved finding,
+yet completeness may remain `COMPLETE`, because the dependency was stated
+precisely and only this module — which owns no calendar by design — cannot
+convert it. `UNSUPPORTED` is `LIMITED_EXPRESSION` and does reduce
+completeness. Every finding is preserved regardless of which category
+determines the summary.
+
+Overlap follows the same declared/undeclared/not-applicable discipline:
+`NOT_APPLICABLE` yields no overlap object, `UNDECLARED` yields none plus an
+`INCOMPLETE` finding, and `DECLARED` always yields a real `OverlapDiagnostics`
+object — carrying `UNRESOLVED` status with every exact metric `None` when
+intervals were not supplied, so the outstanding obligation survives instead of
+disappearing. A `DECLARED` overlap must state `sampling_step_bars` (a positive
+integer), which is declaration- and fingerprint-bearing even though the current
+interval algorithms do not consume it. Resolved `SampleInformationInterval`
+values are half-open `[start_bar_index, end_bar_index)` within one
+caller-provided bar-index domain — the type carries no grid identifier of its
+own, and cross-domain interval identity validation is deliberately out of
+scope for V0.1 rather than simulated with per-interval grid metadata — and
+expose exact maximum concurrency and maximum non-overlapping counts.
+
+Strict-sequential evaluation is a V0.1 **capability boundary**, not a
+caller-declared option: there is no topology field on the declaration, none in
+the canonical payload, and none in either fingerprint. Under that single
+supported capability the derivation is constant — `required_embargo_bars = 0`
+with `embargo_reason = NO_APPLICABLE_DEPENDENCY`. This derivation is valid
+only for V0.1's strict-sequential capability; non-sequential and
+combinatorial-purged cross-validation topologies are not implemented, and when
+one is introduced this constant must be revisited rather than reused.
+
+The module carries its own narrow canonicalizer — UTF-8, canonical JSON with
+sorted keys and fixed separators, full SHA-256, enums by `.value`, `timedelta`
+as exact integer microseconds, explicit `None`, and canonical feature order by
+`feature_id` — which rejects any other type rather than coercing it. It
+neither imports nor generalizes the Experiment Governance canonicalizer, and
+that closed module is unchanged. `declaration_fingerprint` covers the
+canonical declarations only; `contract_fingerprint` covers the contract
+version plus those declarations, and it is `contract_fingerprint` — not
+`declaration_fingerprint` — that is intended for a future
+`governed_components["information_dependency"]` entry. Producing that string
+is the whole of the integration seam: this module imports and instantiates no
+Experiment Governance object. Both fingerprints are exposed on the report as
+derived read-only properties sourced from the declaration it was built from,
+so there is no fingerprint field for a caller to supply or assign — they are
+provenance facts rather than constructor input. It is a stdlib-only
+pure-compute leaf with no Data Layer, trading-calendar, repository, or
+sibling-engine imports, enforced by permanent structural tests.
 
 ## Explicit non-goals
 
