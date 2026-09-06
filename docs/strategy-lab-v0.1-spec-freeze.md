@@ -134,6 +134,7 @@ Strategy Lab delivery status:
 | Experiment governance (manifest, parameter origin, lineage audit) | Implemented — Foundation |
 | Information dependency contract (warmup, purge, embargo, overlap) | Implemented — Foundation |
 | Temporal contract (aware datetimes, UTC canonicalization, intervals, availability) | Implemented — Foundation |
+| Universe integrity (PIT membership/lifecycle/classification, coverage certificates) | Implemented — Foundation |
 | OOS/walk-forward, benchmark/alpha, and regime checks | Planned |
 | Component attribution | Planned |
 | Breakout/retest/Chandelier experiment | Deferred until validation infrastructure exists |
@@ -572,6 +573,52 @@ implements this exact validate-canonicalize rule privately
 design, so the closed module stays closed. It is a stdlib-only pure-compute
 leaf, enforced by permanent structural tests asserting no trading-calendar,
 Data-Layer, repository, or sibling-engine imports.
+
+The Universe Integrity Foundation lives in
+`src/services/strategy_lab/universe_integrity.py`. It reconstructs
+point-in-time universe membership, instrument lifecycle, and classification
+history from causally-timestamped anchors and events, using only the
+Temporal Contract's `effective_at`/`available_at` pair — it depends on
+nothing else, including no repositories, providers, trading calendar,
+security-master identity, `information_dependency`, or
+`experiment_governance`. An anchor is a complete, absolute state assertion at
+one instant (for membership, the entire member set, never a delta); an event
+is likewise absolute (`MEMBER`/`NON_MEMBER`, `LISTED`/`NOT_LISTED`, or a full
+`ClassificationValue`), never an add/remove command, so reconstruction never
+needs to replay history in order — only the single latest-effective,
+latest-visible revision for a subject ever matters. Anchor selection groups
+eligible anchors (`effective_at <= as_of`) by `effective_at`, resolves each
+group's latest-visible subgroup (collapsing exact duplicates, flagging
+internal contradiction as `ANCHOR_CONFLICT`), and selects the
+highest-effective group regardless of whether it resolves or conflicts — an
+older resolved group can never bypass a later-effective conflict, but a
+later-effective resolved group can supersede an earlier conflict. Events at
+exactly the selected anchor's `effective_at` are never applied as a state
+change and never silently ignored: each such boundary subject's resolved
+value is compared against the anchor's own implied value, agreement is
+harmless, disagreement is `ANCHOR_EVENT_CONFLICT`, and internal contradiction
+within the boundary subgroup itself is `EVENT_CONFLICT`. A correction to the
+anchor's own value must be a new anchor revision — same `effective_at`, later
+`available_at` — never a same-instant event. Coverage is positive-only:
+a `*CoverageCertificate` is independently re-fingerprinted from the facts
+actually in hand and compared against `certified_event_slice_fingerprint`; a
+wrong scope or mismatched fingerprint makes that certificate unusable without
+poisoning any other valid one. Coverage is required exactly when
+`as_of > selected_anchor.effective_at`; when required, the merged valid
+interval that *contains* the anchor (not the globally furthest interval)
+must extend strictly past `as_of` — `coverage_end == as_of` is insufficient
+by construction, matching event eligibility (`effective_at <= as_of`).
+`compute_*_event_slice_fingerprint` are narrow SHA-256 digests over exactly
+the schema tag, domain, scope, coverage window, and every event (never the
+anchor) whose `effective_at` falls in `[coverage_start, coverage_end)` —
+exact duplicates collapse, input order never matters, and a change strictly
+outside the window never changes the fingerprint. `instrument_id`,
+`universe_id`, `taxonomy_id`, and `classification_id` are opaque exact-match
+strings with no normalization, aliasing, or coercion, and a raw string is
+never accepted where an enum member is required. `UniverseIntegrityResolutionStatus`
+is a distinct enum from `information_dependency.ResolutionStatus` — this
+module does not import that module at all. It is a stdlib-plus-Temporal-Contract-only
+pure-compute leaf, enforced by permanent structural tests.
 
 ## Explicit non-goals
 

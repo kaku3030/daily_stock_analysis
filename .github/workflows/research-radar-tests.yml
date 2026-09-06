@@ -100,6 +100,7 @@ jobs:
             tests/test_strategy_lab_experiment_governance.py \
             tests/test_strategy_lab_information_dependency.py \
             tests/test_strategy_lab_temporal_contract.py \
+            tests/test_strategy_lab_universe_integrity.py \
             tests/test_run_stock_radar_qa.py \
             tests/test_run_stock_radar_technical_state.py
 
