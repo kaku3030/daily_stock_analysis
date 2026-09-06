@@ -83,6 +83,13 @@ from .parameter_stability import (
     evaluate_parameter_stability,
 )
 from .performance_models import PerformanceReport
+from .temporal_contract import (
+    TemporalEvidence,
+    TemporalInterval,
+    canonical_utc_datetime,
+    canonical_utc_text,
+    is_available_by,
+)
 from .validation_gate import (
     SOFT_VALIDATION_SOURCES,
     SoftValidationReport,
@@ -155,6 +162,8 @@ __all__ = [
     "StateDependency",
     "StrategyLabValidationConfig",
     "StrategyValidationCase",
+    "TemporalEvidence",
+    "TemporalInterval",
     "TradeObservation",
     "UnresolvedCategory",
     "UnresolvedCode",
@@ -169,10 +178,13 @@ __all__ = [
     "assess_no_lookahead",
     "assess_parameter_stability",
     "audit_experiment_lineage",
+    "canonical_utc_datetime",
+    "canonical_utc_text",
     "evaluate_edge_concentration",
     "evaluate_execution_stress",
     "evaluate_information_dependency",
     "evaluate_parameter_stability",
+    "is_available_by",
     "load_edge_concentration_config",
     "load_execution_stress_config",
     "load_parameter_stability_config",

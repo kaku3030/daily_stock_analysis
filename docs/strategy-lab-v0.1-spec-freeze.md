@@ -133,6 +133,7 @@ Strategy Lab delivery status:
 | Cost/execution stress | Implemented — Foundation |
 | Experiment governance (manifest, parameter origin, lineage audit) | Implemented — Foundation |
 | Information dependency contract (warmup, purge, embargo, overlap) | Implemented — Foundation |
+| Temporal contract (aware datetimes, UTC canonicalization, intervals, availability) | Implemented — Foundation |
 | OOS/walk-forward, benchmark/alpha, and regime checks | Planned |
 | Component attribution | Planned |
 | Breakout/retest/Chandelier experiment | Deferred until validation infrastructure exists |
@@ -532,6 +533,45 @@ so there is no fingerprint field for a caller to supply or assign — they are
 provenance facts rather than constructor input. It is a stdlib-only
 pure-compute leaf with no Data Layer, trading-calendar, repository, or
 sibling-engine imports, enforced by permanent structural tests.
+
+The Temporal Contract Foundation lives in
+`src/services/strategy_lab/temporal_contract.py`. It owns aware-datetime
+validation, UTC canonicalization, deterministic UTC text, half-open temporal
+intervals, effective/available temporal evidence, and pure availability
+ordering — it does not own trading calendar, market session, bar-grid,
+timestamp parsing, or persistence. Every public datetime input must be an
+actual `datetime` with `tzinfo is not None` and `utcoffset() is not None`; a
+`str`, an `int`/`float` epoch, a naive datetime, or a datetime whose `tzinfo`
+reports `utcoffset() is None` are all rejected with `ValueError` rather than
+coerced, and a naive value is never assumed to be UTC or any other zone.
+Canonicalization always uses `value.astimezone(timezone.utc)`, never
+`value.replace(tzinfo=timezone.utc)` — the two are not interchangeable, since
+`replace` overwrites the offset without shifting the instant, while
+`astimezone` converts to the same instant expressed in UTC. A
+caller-provided, correctly aware `ZoneInfo`-backed datetime is legal input;
+the module itself imports no `zoneinfo` and branches on no timezone name.
+`canonical_utc_text` is `isoformat(timespec="microseconds")` in UTC — always
+exactly six fractional digits and a literal `+00:00` suffix, never `Z` — a
+deliberately different convention from `src/llm/usage.py`'s
+seconds-precision, `Z`-suffixed text elsewhere in the repository; the two are
+not unified. `TemporalInterval` is half-open `[start, end)` with `start <
+end` strictly enforced, so `contains(start)` is `True`, `contains(end)` is
+`False`, and two adjacent intervals never overlap; `contains` validates its
+`moment` argument through the same rule as every other datetime input.
+`TemporalEvidence` carries `effective_at` and `available_at` with
+deliberately **no** ordering constraint between them — either may precede,
+equal, or follow the other — and carries no `published_at`/`received_at`/
+`recorded_at` field, since producer timestamp honesty or provenance is
+explicitly out of scope. `is_available_by` is a pure causality query:
+`available_at <= decision_time` is `True` (equality is intentionally
+available), `available_at > decision_time` is `False`, and an invalid
+`decision_time` always raises rather than degrading to `False`. This module
+neither imports nor refactors `experiment_governance`, which already
+implements this exact validate-canonicalize rule privately
+(`_require_utc_datetime`) — the two are independent implementations by
+design, so the closed module stays closed. It is a stdlib-only pure-compute
+leaf, enforced by permanent structural tests asserting no trading-calendar,
+Data-Layer, repository, or sibling-engine imports.
 
 ## Explicit non-goals
 
