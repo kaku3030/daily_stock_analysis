@@ -63,7 +63,7 @@ from src.utils.sniper_points import extract_sniper_points, parse_sniper_value
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
-CURRENT_SCHEMA_VERSION = "2026-06-05-create-all-baseline"
+CURRENT_SCHEMA_VERSION = "2026-09-07-oos-consumption-ledger-v0.1"
 INTELLIGENCE_ITEM_NULL_SCOPE_VALUE = "__dsa_null_scope__"
 
 # SQLAlchemy ORM 基类
@@ -95,6 +95,55 @@ class DatabaseSchemaMigration(Base):
     version = Column(String(64), primary_key=True)
     description = Column(String(255), nullable=False)
     applied_at = Column(DateTime, default=datetime.now, nullable=False, index=True)
+
+
+class OOSExperimentIdentityRecord(Base):
+    """Immutable first-seen experiment identity for the OOS Consumption Ledger.
+
+    ``experiment_id`` maps permanently to exactly one definition; any later
+    contradiction is an integrity conflict, never a new version. Temporal
+    columns deliberately use canonical UTC TEXT, not the repo-wide UTC-naive
+    DateTime convention, because the Ledger consumes the Strategy Lab
+    Temporal Contract.
+    """
+
+    __tablename__ = 'oos_experiment_identity_records'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    experiment_id = Column(String(128), unique=True, nullable=False, index=True)
+    manifest_hash = Column(String(64), nullable=False)
+    parent_experiment_id = Column(String(128), nullable=True, index=True)
+    root_experiment_id = Column(String(128), nullable=False, index=True)
+    registered_at_utc_text = Column(String(40), nullable=False)
+
+
+class OOSConsumptionEventRecord(Base):
+    """Append-only OOS consumption event; the only source of truth.
+
+    ``event_id`` is the persistence-authoritative ordering; ``recorded_at``
+    is diagnostic only. ``operation_id`` is globally unique and binds the
+    semantic operation fingerprint for idempotent retry.
+    """
+
+    __tablename__ = 'oos_consumption_event_records'
+
+    # sqlite_autoincrement=True (table-level SQLite dialect option) emits a
+    # true "INTEGER PRIMARY KEY AUTOINCREMENT" in SQLite DDL: event_id must
+    # be the persistence-authoritative ordering and may never be reused.
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    event_id = Column(Integer, primary_key=True, autoincrement=True)
+    operation_id = Column(String(128), unique=True, nullable=False, index=True)
+    operation_fingerprint = Column(String(64), nullable=False)
+    experiment_id = Column(String(128), nullable=False, index=True)
+    manifest_hash = Column(String(64), nullable=False)
+    root_experiment_id = Column(String(128), nullable=False, index=True)
+    lineage_binding_fingerprint = Column(String(64), nullable=False)
+    oos_start_utc_text = Column(String(40), nullable=False)
+    oos_end_utc_text = Column(String(40), nullable=False)
+    event_kind = Column(String(32), nullable=False, index=True)
+    declared_occurred_at_utc_text = Column(String(40), nullable=False)
+    recorded_at_utc_text = Column(String(40), nullable=False)
 
 
 class StockDaily(Base):
@@ -1383,6 +1432,10 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             self._ensure_decision_signal_profile_schema()
             self._ensure_stock_daily_canonical_id()
             self._ensure_intelligence_item_scope_values()
+            # Ledger schema must be created AND validated before the
+            # migration version is stamped: a malformed/partial Ledger table
+            # must fail closed without recording the version as applied.
+            self._ensure_oos_consumption_ledger_schema()
             self._ensure_schema_migration_record()
             self._ensure_intelligence_items_unique_index()
 
@@ -1428,6 +1481,163 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             raise
         finally:
             session.close()
+
+    def _ensure_oos_consumption_ledger_schema(self) -> None:
+        """Create and strictly validate the OOS Consumption Ledger tables.
+
+        ``Base.metadata.create_all`` already creates them on a fresh DB; this
+        guard covers pre-existing database files (the ledger is added after
+        the baseline schema shipped). After ensure, the actual existing
+        tables are inspected against the exact frozen persistence contract:
+
+        - required columns with required NOT NULL nullability
+        - identity: id INTEGER primary key; experiment_id dedicated
+          single-column, non-partial UNIQUE
+        - events: event_id INTEGER PRIMARY KEY with a true AUTOINCREMENT
+          clause; operation_id dedicated single-column, non-partial UNIQUE
+        - temporal columns TEXT-compatible
+
+        A composite UNIQUE that merely *contains* the required column, a
+        partial unique index, a nullable required column, or a missing
+        AUTOINCREMENT all fail closed: initialization raises and the Ledger
+        migration version is never stamped. Follows the repo's
+        check-then-create migration style: no Alembic, no destructive
+        backfill.
+        """
+
+        if not self._is_sqlite_engine:
+            return
+        inspector = inspect(self._engine)
+        if not inspector.has_table(OOSExperimentIdentityRecord.__tablename__):
+            OOSExperimentIdentityRecord.__table__.create(self._engine, checkfirst=True)
+        if not inspector.has_table(OOSConsumptionEventRecord.__tablename__):
+            OOSConsumptionEventRecord.__table__.create(self._engine, checkfirst=True)
+
+        required_columns: dict[str, dict[str, bool]] = {
+            OOSExperimentIdentityRecord.__tablename__: {
+                "id": False,
+                "experiment_id": True,
+                "manifest_hash": True,
+                "parent_experiment_id": False,
+                "root_experiment_id": True,
+                "registered_at_utc_text": True,
+            },
+            OOSConsumptionEventRecord.__tablename__: {
+                "event_id": True,
+                "operation_id": True,
+                "operation_fingerprint": True,
+                "experiment_id": True,
+                "manifest_hash": True,
+                "root_experiment_id": True,
+                "lineage_binding_fingerprint": True,
+                "oos_start_utc_text": True,
+                "oos_end_utc_text": True,
+                "event_kind": True,
+                "declared_occurred_at_utc_text": True,
+                "recorded_at_utc_text": True,
+            },
+        }
+        temporal_columns = {
+            OOSExperimentIdentityRecord.__tablename__: {"registered_at_utc_text"},
+            OOSConsumptionEventRecord.__tablename__: {
+                "oos_start_utc_text",
+                "oos_end_utc_text",
+                "declared_occurred_at_utc_text",
+                "recorded_at_utc_text",
+            },
+        }
+        single_column_unique: dict[str, str] = {
+            OOSExperimentIdentityRecord.__tablename__: "experiment_id",
+            OOSConsumptionEventRecord.__tablename__: "operation_id",
+        }
+        primary_keys = {
+            OOSExperimentIdentityRecord.__tablename__: ["id"],
+            OOSConsumptionEventRecord.__tablename__: ["event_id"],
+        }
+
+        problems: list[str] = []
+        for table_name, columns_spec in required_columns.items():
+            if not inspector.has_table(table_name):
+                problems.append(f"table {table_name!r} is missing")
+                continue
+            columns = {column["name"]: column for column in inspector.get_columns(table_name)}
+            for column_name, must_be_not_null in columns_spec.items():
+                column = columns.get(column_name)
+                if column is None:
+                    problems.append(f"table {table_name!r} is missing required column {column_name!r}")
+                    continue
+                if must_be_not_null and column.get("nullable", True):
+                    problems.append(
+                        f"table {table_name!r} column {column_name!r} must be NOT NULL"
+                    )
+                if column_name in temporal_columns[table_name]:
+                    declared = str(column["type"]).upper()
+                    if not any(token in declared for token in ("CHAR", "TEXT", "CLOB")):
+                        problems.append(
+                            f"table {table_name!r} column {column_name!r} is not TEXT-affine "
+                            f"(declared {column['type']!r})"
+                        )
+            for column_name in primary_keys[table_name]:
+                column = columns.get(column_name)
+                if column is not None and "INT" not in str(column["type"]).upper():
+                    problems.append(
+                        f"table {table_name!r} primary key column {column_name!r} is not "
+                        f"INTEGER-affine (declared {column['type']!r})"
+                    )
+
+            pk = inspector.get_pk_constraint(table_name)
+            if list(pk.get("constrained_columns") or []) != primary_keys[table_name]:
+                problems.append(
+                    f"table {table_name!r} primary key is not {primary_keys[table_name]!r} "
+                    f"(actual {pk.get('constrained_columns')!r})"
+                )
+
+            required_unique = single_column_unique[table_name]
+            if not self._has_exact_single_column_unique(inspector, table_name, required_unique):
+                problems.append(
+                    f"table {table_name!r} lacks a dedicated single-column, non-partial "
+                    f"UNIQUE constraint on {required_unique!r}"
+                )
+
+        # The event table must carry a true AUTOINCREMENT clause.
+        if inspector.has_table(OOSConsumptionEventRecord.__tablename__):
+            with self._engine.connect() as connection:
+                ddl = connection.exec_driver_sql(
+                    "SELECT sql FROM sqlite_master "
+                    "WHERE type='table' AND name=:name",
+                    {"name": OOSConsumptionEventRecord.__tablename__},
+                ).scalar_one_or_none()
+            if not ddl or "AUTOINCREMENT" not in ddl.upper():
+                problems.append(
+                    f"table {OOSConsumptionEventRecord.__tablename__!r} lacks the "
+                    f"AUTOINCREMENT clause on event_id"
+                )
+
+        if problems:
+            raise RuntimeError(
+                "OOS Consumption Ledger schema validation failed -- refusing to stamp "
+                "the migration version: " + "; ".join(problems)
+            )
+
+    @staticmethod
+    def _has_exact_single_column_unique(inspector: Any, table_name: str, column_name: str) -> bool:
+        """Whether the table has a dedicated UNIQUE constraint whose indexed
+        column set is exactly [column_name] and which is unconditional
+        (non-partial). A composite or partial unique does NOT qualify."""
+
+        for constraint in inspector.get_unique_constraints(table_name):
+            if list(constraint.get("column_names") or []) == [column_name]:
+                return True
+        for index in inspector.get_indexes(table_name):
+            if not index.get("unique"):
+                continue
+            if list(index.get("column_names") or []) != [column_name]:
+                continue
+            dialect_options = index.get("dialect_options") or {}
+            if "sqlite_where" in dialect_options:
+                continue  # partial unique index -- not unconditional
+            return True
+        return False
 
     def _ensure_decision_signal_profile_schema(self) -> None:
         """Add and backfill nullable decision_profile for existing SQLite DBs."""

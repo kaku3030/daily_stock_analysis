@@ -136,6 +136,7 @@ Strategy Lab delivery status:
 | Temporal contract (aware datetimes, UTC canonicalization, intervals, availability) | Implemented — Foundation |
 | Universe integrity (PIT membership/lifecycle/classification, coverage certificates) | Implemented — Foundation |
 | Walk-Forward Core (fold geometry, parameter provenance, causal-separation, information-dependency and universe-integrity binding) | Implemented — Foundation |
+| OOS Consumption Ledger (append-only PRISTINE/CONSUMED/BURNED ledger, immutable identity registry, claim-before-evaluate) | Implemented — Foundation |
 | Benchmark/alpha and regime checks | Planned |
 | Component attribution | Planned |
 | Breakout/retest/Chandelier experiment | Deferred until validation infrastructure exists |
@@ -697,6 +698,99 @@ is caller-declared provenance: V0.1 detects contradictions against frozen
 windows and governance, but does not prove undeclared inputs were never
 read. Fold order, finding order, and evidence order are all canonicalized at
 construction time, so permuting any input sequence never changes the output.
+
+**OOS Consumption Ledger** (`src/services/strategy_lab/oos_consumption.py`
+domain + `src/repositories/oos_consumption_ledger_repo.py` persistence +
+two ORM tables in `src/storage.py`) is the first persistent Strategy Lab
+module. Consumption state is frozen monotonic severity
+`PRISTINE < CONSUMED < BURNED`; PRISTINE is never materialized as a
+current-state row — absence of qualifying exposure *is* PRISTINE.
+`CLAIMED_FOR_EVALUATION` implies at least CONSUMED and `OUTCOME_USED`
+implies BURNED; PRISTINE may jump directly to BURNED (refusing to record a
+known burn because no claim exists would let contamination be forgotten).
+Every downgrade is forbidden and the public API has no
+reset/delete/unconsume/unburn surface. Consumption state is separate from
+`OOSConsumptionResolution` (`RESOLVED` / `INDETERMINATE` / `CONFLICT`):
+unresolved lineage yields `INDETERMINATE + state=None`, never a fake
+PRISTINE. Official claim eligibility is the whole requested OOS interval:
+any overlapping BURNED exposure makes the whole request BURNED, else any
+overlapping CONSUMED exposure makes it CONSUMED, else PRISTINE —
+half-open `[A,B)` and `[B,C)` are adjacent, not overlapping, and there is
+no per-segment claim eligibility (future per-segment diagnostics are
+non-authoritative). Repeated claim of an exposed interval is denied
+(`ALREADY_EXPOSED`), never auto-burned. Claim-before-evaluate is mandatory
+and a committed claim stays CONSUMED even if the evaluation crashes. The
+ledger itself runs `audit_experiment_lineage` with
+`history_complete=False` and never accepts a caller-supplied verdict:
+PASS + PRISTINE is required for a claim; INDETERMINATE abstains;
+VIOLATION denies claim *and* burn. An INDETERMINATE lineage does not block
+`mark_outcome_used` when the target identity itself is unambiguous —
+missing ancestors are never fabricated, and later registration of a
+missing ancestor can resolve the persisted graph (INDETERMINATE → PASS),
+while no mutation can downgrade it. An immutable first-seen identity
+registry (`oos_experiment_identity_records`, `experiment_id` UNIQUE) binds
+each experiment_id permanently to one `manifest_hash`/`parent`/`root`;
+any contradiction raises `OOSLedgerIdentityConflictError`. Only
+target-reachable lineage nodes may be registered, fingerprinted, or used
+for inheritance: starting from the target and following
+`parent_experiment_id` toward the root, co-supplied nodes that are not on
+this ancestry path are ignored completely. A reachable chain containing a
+self-parent, a cycle, conflicting duplicate definitions, or a broken root
+invariant is treated as a lineage violation and the write is rejected.
+Denied claims (`LINEAGE_INDETERMINATE` / `LINEAGE_VIOLATION` /
+`ALREADY_EXPOSED`) produce no persistent mutation at all -- no event, no
+new identity rows, no reserved `operation_id` (idempotency applies only to
+persisted state-changing events, so a retried operation re-evaluates the
+current ledger state). Write precedence is frozen: (1) locate the
+persisted-event idempotency key without resolving it; (2) persistent
+identity conflict over the FULL supplied manifest set is a hard
+`OOSLedgerIdentityConflictError` -- never hidden behind a structural
+verdict or an idempotent replay; (3) the tentative overlay graph
+(persisted registry + target-reachable candidate definitions) must be
+structurally valid -- no self-parent, no lineage cycle, no root-invariant
+violation, no child/root mismatch -- otherwise the write is rejected as a
+lineage violation and nothing persists (two individually-INDETERMINATE
+burns must never compose into a permanent cycle); (4) only now is
+idempotency resolved: exact semantic match replayed, mismatch is
+`OOSLedgerIdempotencyConflictError`; (5) lineage audit, then claim
+eligibility. INDETERMINATE burns remain permitted only for missing
+ancestry (a valid but truncated target-to-ancestor chain), never for a
+known contradiction. Claim gate precedence: lineage VIOLATION /
+INDETERMINATE are reported before any exposure evaluation; only a PASS
+lineage plus a persistent-graph RESOLVED assessment reaches the
+PRISTINE-vs-ALREADY_EXPOSED gate. Queries accept
+an `experiment_id` only and derive self+ancestors exclusively from the
+persisted graph, so a caller can never make previously persisted exposure
+disappear by omitting ancestry. All writes run inside
+`DatabaseManager._run_write_transaction` (SQLite `BEGIN IMMEDIATE` + lock
+retry): operation-idempotency resolution, identity register-or-verify,
+lineage audit, overlap check and event insert form one atomic critical
+section, so two concurrent overlapping claims serialize and exactly one
+observes PRISTINE. `operation_id` is globally UNIQUE and binds a semantic
+operation fingerprint (schema tag, event kind, experiment identity,
+interval, declared time, reachable-lineage-binding digest -- never the
+operation_id itself; the lineage binding is canonicalized over the
+target-reachable set with exact duplicates collapsed and sorted by
+experiment_id, so it is invariant to input order, exact duplicates, and
+unrelated supplied nodes): identical replay is `IDEMPOTENT_REPLAY`, a
+changed payload under the same id raises
+`OOSLedgerIdempotencyConflictError`. `event_id` is
+`INTEGER PRIMARY KEY AUTOINCREMENT` in the actual SQLite DDL
+(`sqlite_autoincrement=True`) and is the persistence-authoritative
+ordering; `recorded_at` is diagnostic only; `declared_occurred_at` is a
+caller claim and no `recorded_at >= declared_occurred_at` constraint
+exists. Temporal columns deliberately store canonical UTC TEXT (never the
+repo-wide UTC-naive DateTime convention) and every read path restores
+aware UTC datetimes. The schema migration record is stamped only after
+the Ledger schema has been created AND validated against the exact frozen
+persistence contract: required columns with required NOT NULL nullability;
+identity `id` INTEGER primary key; events `event_id`
+`INTEGER PRIMARY KEY AUTOINCREMENT` (verified in the real SQLite DDL);
+dedicated single-column, non-partial UNIQUE on `experiment_id` and
+`operation_id` (a composite or partial unique does NOT qualify); and
+TEXT-affine temporal columns. A malformed or partial pre-existing Ledger
+table fails closed -- the migration version is not recorded and
+initialization raises.
 
 ## Explicit non-goals
 
