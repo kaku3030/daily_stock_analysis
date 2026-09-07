@@ -135,7 +135,8 @@ Strategy Lab delivery status:
 | Information dependency contract (warmup, purge, embargo, overlap) | Implemented — Foundation |
 | Temporal contract (aware datetimes, UTC canonicalization, intervals, availability) | Implemented — Foundation |
 | Universe integrity (PIT membership/lifecycle/classification, coverage certificates) | Implemented — Foundation |
-| OOS/walk-forward, benchmark/alpha, and regime checks | Planned |
+| Walk-Forward Core (fold geometry, parameter provenance, causal-separation, information-dependency and universe-integrity binding) | Implemented — Foundation |
+| Benchmark/alpha and regime checks | Planned |
 | Component attribution | Planned |
 | Breakout/retest/Chandelier experiment | Deferred until validation infrastructure exists |
 
@@ -619,6 +620,83 @@ never accepted where an enum member is required. `UniverseIntegrityResolutionSta
 is a distinct enum from `information_dependency.ResolutionStatus` — this
 module does not import that module at all. It is a stdlib-plus-Temporal-Contract-only
 pure-compute leaf, enforced by permanent structural tests.
+
+**Walk-Forward Core** (`validate_walk_forward`) validates whether
+caller-declared fold geometry, parameter provenance, causal-separation
+evidence, information-dependency obligations, lineage evidence, and PIT
+universe evidence are structurally self-consistent enough to qualify as OOS
+evidence — never whether the strategy is profitable. Unlike the other
+foundations, it is a genuine consumer: it imports and cross-checks
+`experiment_governance` (`ExperimentManifest`, `ParameterOrigin`,
+`ExperimentLineageAudit`), `information_dependency`
+(`InformationDependencyReport`), and `universe_integrity` (the three
+Resolution types) without modifying any of them. Because `ExperimentManifest`
+must already be frozen before this function runs, yet
+`window_configuration`/`contamination_policy`/`evaluation_protocol` depend on
+the same `mode`/`folds`/`parameter_selection_mode` this function receives,
+the three `compute_*_fingerprint` helpers are public functions a caller uses
+to pre-commit those values into `governed_components` ahead of time — mirroring
+how `information_dependency` and `universe_policy` reuse
+`InformationDependencyReport.contract_fingerprint` and
+`UniverseIntegrityRequirement.fingerprint`. Any missing or mismatched
+governed-component fingerprint is `INVALID`. `WalkForwardFindingCode` maps
+onto a four-state `FoldValidationStatus` (`INVALID > LEAKAGE_RISK >
+INSUFFICIENT_DATA > VALID`); experiment-wide problems (manifest binding,
+lineage verdict, information-dependency completeness, FIXED-mode provenance
+violations, `EXPERIMENT_IDENTITY_MISMATCH`, and the FIXED-mode input
+preconditions below) are recorded once as a `fold_id=None` entry in
+`report_findings` and once more, verbatim, attached to every fold's own
+`FoldValidationResult`, since a fold's status can only be derived from its
+own findings and a report-level finding must never spawn a phantom fold
+result — exactly one `FoldValidationResult` per input fold, always. Only
+malformed-type/negative-count/naive-datetime/impossible-invariant inputs
+raise `ValueError`; every other failure this module can detect about an
+otherwise well-formed experiment is an auditable finding that still returns
+a report. In particular, a `manifest.experiment_id` /
+`lineage_audit.experiment_id` mismatch is `EXPERIMENT_IDENTITY_MISMATCH`
+(`INVALID`, broadcast), and a `FIXED` call missing `parameter_origin` is
+`PARAMETER_ORIGIN_REQUIRED`, missing `fixed_parameter_evidence` is
+`FIXED_EVIDENCE_REQUIRED`, and carrying non-empty
+`fold_parameter_selection_evidence` is
+`FORBIDDEN_FOLD_SELECTION_EVIDENCE_UNDER_FIXED` (all three `INVALID`,
+broadcast) — none of these abort validation. With zero input folds, `FIXED`
+parameter-hash-mismatch and `PRIOR_EXPERIMENT` self-reference checks still
+run (they need no fold data), but the `information_horizon_end`/`declared_at`
+boundary checks are skipped rather than inventing a fake
+`experiment_data_boundary`, since that boundary is defined as
+`min(fold.train_interval.start)` and is undefined for an empty fold set;
+`total_fold_count` is simply `0`. Per-fold evidence collections are grouped
+by `fold_id` before anything is inspected: an id absent from the input folds
+is one `EVIDENCE_FOLD_ID_UNKNOWN` per *distinct* unknown id regardless of how
+many entries share it (report-level), more than one entry for one known fold
+is `DUPLICATE_EVIDENCE_FOLD_ID` (that fold's evidence is then treated as
+absent everywhere), and a fold with no matching entry is
+`FOLD_EVIDENCE_MISSING`. Purge is driven exclusively by
+`information_dependency.required_purge_bars` and checked against the
+declared label's bar grid; a fold with no `validation_interval` must not
+carry a non-`None` `applied_train_to_validation_purge_bars` (contradiction is
+`INVALID_FOLD_GEOMETRY`, since there is no train-to-validation boundary for
+it to describe), and likewise a fold with no `validation_interval` must not
+carry a non-`None` `usable_validation_bars` in its data evidence (same code,
+same reasoning). Warmup is checked by `required_warmup_bars` against the
+declared *evaluation* grid — `feature_set.payload.evaluation_bar_grid_id`
+when the feature set is `DECLARED`, or `state.payload.bar_grid_id` when a
+positive resolved warmup is instead driven entirely by a `DECLARED`
+`COLD_START` state with the feature set `NOT_APPLICABLE` (the only
+constructible way a positive, resolved warmup can exist without a declared
+feature evaluation grid — the closed `StateDependency` contract already
+requires `bar_grid_id` whenever `convergence_warmup_bars` is positive, so
+this is read from that existing field, never invented); `None` and `0` are
+never conflated for `usable_validation_bars`/`usable_oos_bars`.
+`CROSS_FOLD_OOS_FEEDBACK` and `EMBARGO_INSUFFICIENT` are reserved,
+structurally-unreachable-in-V0.1 finding codes — the former because
+raw-market-fact reuse and OOS-outcome-driven parameter influence cannot be
+distinguished from declared timestamps alone, the latter because
+`required_embargo_bars` is currently always 0. `FoldParameterSelectionEvidence`
+is caller-declared provenance: V0.1 detects contradictions against frozen
+windows and governance, but does not prove undeclared inputs were never
+read. Fold order, finding order, and evidence order are all canonicalized at
+construction time, so permuting any input sequence never changes the output.
 
 ## Explicit non-goals
 
