@@ -137,6 +137,7 @@ Strategy Lab delivery status:
 | Universe integrity (PIT membership/lifecycle/classification, coverage certificates) | Implemented — Foundation |
 | Walk-Forward Core (fold geometry, parameter provenance, causal-separation, information-dependency and universe-integrity binding) | Implemented — Foundation |
 | OOS Consumption Ledger (append-only PRISTINE/CONSUMED/BURNED ledger, immutable identity registry, claim-before-evaluate) | Implemented — Foundation |
+| Parameter Drift V0.1 (Parameter Selection Identity Drift: cross-fold selected-identity movement from opaque `selected_parameter_hash`; identity-only, no distance, no score/label, FIXED → NOT_APPLICABLE, frozen gap semantics, pure compute) | DESIGN: FROZEN / IMPLEMENT: IMPLEMENTED — FOUNDATION |
 | Benchmark/alpha and regime checks | Planned |
 | Component attribution | Planned |
 | Breakout/retest/Chandelier experiment | Deferred until validation infrastructure exists |

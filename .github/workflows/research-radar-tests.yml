@@ -106,6 +106,7 @@ jobs:
             tests/test_strategy_lab_walk_forward.py \
             tests/test_strategy_lab_oos_consumption.py \
             tests/test_oos_consumption_ledger_repo.py \
+            tests/test_strategy_lab_parameter_drift.py \
             tests/test_run_stock_radar_qa.py \
             tests/test_run_stock_radar_technical_state.py
 
