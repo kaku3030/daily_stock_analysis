@@ -153,6 +153,15 @@ from .walk_forward import (
     compute_window_configuration_fingerprint,
     validate_walk_forward,
 )
+from .parameter_drift import (
+    ParameterDriftFinding,
+    ParameterDriftFindingCode,
+    ParameterDriftFoldObservation,
+    ParameterDriftReport,
+    ParameterDriftResolution,
+    ParameterDriftTransition,
+    evaluate_parameter_drift,
+)
 from .oos_consumption import (
     OOSBurnStatus,
     OOSClaimResult,
@@ -318,6 +327,13 @@ __all__ = [
     "OOSLedgerIdentityConflictError",
     "OOSLedgerIdempotencyConflictError",
     "OOSLedgerWriteResult",
+    "ParameterDriftFinding",
+    "ParameterDriftFindingCode",
+    "ParameterDriftFoldObservation",
+    "ParameterDriftReport",
+    "ParameterDriftResolution",
+    "ParameterDriftTransition",
+    "evaluate_parameter_drift",
     "parse_aware_utc_text",
     "resolve_classification",
     "resolve_instrument_lifecycle",
