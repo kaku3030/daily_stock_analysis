@@ -51,7 +51,7 @@ python kline_snapshot_probe.py \
   --repeat 3 --repeat-delay 120 --rpc-timeout 30
 ```
 
-Same-day historical dates are derived from `America/New_York`, never from the execution host's local timezone.
+Same-day historical dates are derived from `America/New_York`, never from the execution host's local timezone. Child structured results are emitted on a unique sentinel-prefixed JSON line; incidental SDK/OpenD stdout remains preserved as separate noise and cannot make a valid result unparsable.
 
 ### 3. Offline mechanical analysis
 
@@ -71,7 +71,7 @@ It deliberately emits `MECHANICAL_OBSERVATION_ONLY` and cannot self-promote a pr
 
 `tests/test_futu_kline_timestamp_semantics_tools.py`
 
-Research Radar CI explicitly executes these tests. They validate evidence-tool logic and anti-false-promotion behavior only; they do not substitute for a live OpenD run.
+Research Radar CI explicitly executes these tests. They validate evidence-tool logic, noisy-stdout recovery and anti-false-promotion behavior only; they do not substitute for a live OpenD run.
 
 ## Evidence rules
 
