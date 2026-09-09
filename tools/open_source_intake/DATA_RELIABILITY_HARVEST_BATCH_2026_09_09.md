@@ -40,7 +40,7 @@ Reasoning: even if the current project is suitable, GX-style expectation suites 
 
 ### Data R1 — malformed numeric bypassed quality gate
 
-Draft PR: https://github.com/kaku3030/daily_stock_analysis/pull/35
+Draft PR: https://github.com/kaku3030/stock-razor/pull/35
 
 Verified code-path defect:
 
@@ -70,14 +70,19 @@ Test matrix includes:
 - negative volume remains severe;
 - valid numeric strings normalize without `INVALID_NUMERIC`.
 
-Validation status at ledger update time:
+Validation status at latest ledger sync:
 
-- Research Radar Tests: PASS on PR #35 head.
-- Main CI: still in progress; therefore do not call the PR fully validated yet.
+- Research Radar focused tests: PASS on PR #35 head.
+- Main CI backend shards 1/3, 2/3, 3/3: PASS.
+- backend-gate: PASS.
+- docker-build: PASS.
+- AI governance / change detection: PASS.
+- Web/Desktop jobs were correctly skipped by path detection.
+- Current promotion truth: automated validation gates observed for this PR head are green; keep Draft/manual-review governance separate from CI status.
 
 ### Data R2 — stale good health survived empty/invalid batches
 
-Stacked Draft PR: https://github.com/kaku3030/daily_stock_analysis/pull/36
+Stacked Draft PR: https://github.com/kaku3030/stock-razor/pull/36
 Base: `harvest/market-data-numeric-coercion-r1` / PR #35.
 
 Verified code-path defect:
@@ -98,14 +103,17 @@ Adapted behavior:
 - mixed valid/invalid timestamp batches mark surviving bars with batch `TIMESTAMP_MISMATCH` evidence;
 - existing severe `TIMESTAMP_MISMATCH` policy blocks downstream actionable permission.
 
-Validation status at ledger update time:
+Validation status at latest ledger sync:
 
-- ADAPTED only.
-- Stacked PR had no independent workflow result at the time of recording; do not infer validation from PR #35.
+- `ADAPTED` only.
+- PR #36 head currently has zero independent check-runs.
+- Reason: it is stacked on PR #35 and its pull-request base is not `main`; current workflows are configured to trigger pull-request validation against `main`.
+- Therefore PR #35's green checks must **not** be inherited or described as validation of PR #36.
+- Required next gate: after #35 lands (or #36 is otherwise retargeted onto an equivalent validated base), run #36 independently before promotion.
 
 ## Evidence-governance repair produced in parallel
 
-Draft PR: https://github.com/kaku3030/daily_stock_analysis/pull/34
+Draft PR: https://github.com/kaku3030/stock-razor/pull/34
 
 Problem: Live Feed Contract Section 21 carried a pre-Wave-2 provider-evidence snapshot while its own named authoritative Futu evidence registry had newer closed-Wave-2 results.
 
