@@ -1,115 +1,77 @@
 <!-- Evidence-only report. No production semantics are inferred from Stock Razor code. -->
 # FUTU KLINE TIMESTAMP SEMANTICS REPORT
 
-Date: 2026-09-09
-Status: P0 PROVIDER-EVIDENCE REPORT
-Scope: Futu OpenAPI / Python SDK semantics relevant to realtime_monitor 15m/1h currentness.
+Date: 2026-09-09  
+Status: P0 PROVIDER-EVIDENCE REPORT  
+Scope: Futu OpenAPI / Python SDK semantics required before realtime_monitor 15m/1h currentness rules may be frozen.
 
-## Executive conclusion
+## CURRENT AUTHORITATIVE STATUS
 
-The official Futu documentation and SDK schema **do not define whether intraday `time_key` is a bar-start timestamp or a bar-end timestamp**. They describe it only as `Time` / `Candlestick time` / a timestamp string.
+**Provider evidence track:** required US K_15M/K_60M semantics remain `UNKNOWN` / `PARTIALLY_VERIFIED` by fact.  
+**Evidence-tooling track:** bounded live capture, per-RPC snapshot/history capture, and offline mechanical analyzer are implemented; exact-head CI must be checked after every change.  
+**Production Currentness track:** **BLOCKED**. No threshold or expected-bar completion rule is authorized.
 
-Existing Stock Razor controlled empirical evidence establishes interval-end-like identity only for **HK K_1M in the tested environment**. That evidence must not be generalized to K_15M, K_60M, or US session alignment.
+Official Futu documentation and SDK schema describe `time_key` only as `Time` / `Candlestick time`; they do **not** define whether K_15M or K_60M timestamps are bar-start boundaries, bar-end boundaries, or another provider-defined identity. They also do not define the US K_60M 09:30-anchor vs clock-hour-anchor rule, forming-bar completion semantics, or half-day bucket truncation.
 
-Therefore the following facts remain insufficient to freeze authoritative 15m/1h currentness rules:
+Existing Stock Razor controlled empirical evidence establishes interval-end-like identity only for tested **HK K_1M**. That scope must not be generalized to US K_15M/K_60M.
 
-- K_15M start-vs-end timestamp semantics;
-- K_60M start-vs-end timestamp semantics;
-- US RTH K_60M bucket anchoring and expected sequence;
-- K_15M/K_60M forming-bar behavior;
-- historical K_15M/K_60M inclusion/exclusion of the currently forming bar;
-- half-day K_15M/K_60M truncation/alignment behavior.
-
-**Do not invent a currentness threshold or infer expected-bar completion from `time_key` alone.**
+**Do not invent a currentness threshold.**
 
 ## Evidence sources
 
 Official Futu OpenAPI v10.10 documentation:
 
-1. Get Real-time Candlestick
-   - https://openapi.futunn.com/futu-api-doc/en/quote/get-kl.html
-   - `time_key`: `Time`, format `yyyy-MM-dd HH:mm:ss`; US market default timezone is US Eastern time.
-2. Get Historical Candlesticks
-   - https://openapi.futunn.com/futu-api-doc/en/quote/request-history-kline.html
-   - `time_key`: `Candlestick time`; `extended_time=False` by default; `session` may select US quote sessions; pre/after/overnight historical K-line support is limited to 60 minutes and below.
-3. Real-time Candlestick Callback
-   - https://openapi.futunn.com/futu-api-doc/en/quote/update-kl.html
-   - push payload carries `Qot_Common.KLine`; no documented bar-complete flag.
-4. Quote definitions / `KLType`, `Session`, `TradeDateType`
-   - https://openapi.futunn.com/futu-api-doc/quote/quote.html
-   - K_15M and K_60M are defined as 15-minute and 60-minute candlestick types.
-   - `Session`: RTH / ETH / ALL semantics for US quotes.
-   - `TradeDateType`: WHOLE / MORNING / AFTERNOON.
-5. Get Trading Calendar
-   - https://openapi.futunn.com/futu-api-doc/en/quote/request-trading-days.html
-   - exposes `trade_date_type`; temporary market closures are explicitly not removed from the returned trading-day calendar.
-6. Official Python SDK source (`FutunnOpen/py-futu-api`)
-   - current `Session` enum includes RTH / ETH / ALL;
-   - no start/end semantic tag is exposed for `time_key`.
-
-No Stock Razor production adapter behavior was used as provider-semantic evidence.
+1. Get Real-time Candlestick — https://openapi.futunn.com/futu-api-doc/en/quote/get-kl.html
+2. Get Historical Candlesticks — https://openapi.futunn.com/futu-api-doc/en/quote/request-history-kline.html
+3. Real-time Candlestick Callback — https://openapi.futunn.com/futu-api-doc/en/quote/update-kl.html
+4. Quote definitions / `KLType`, `Session`, `TradeDateType` — https://openapi.futunn.com/futu-api-doc/quote/quote.html
+5. Trading Calendar — https://openapi.futunn.com/futu-api-doc/en/quote/request-trading-days.html
+6. Official Python SDK source — `FutunnOpen/py-futu-api`
 
 Existing controlled Stock Razor evidence:
 
 - `tools/provider_semantics/futu/FUTU_SEMANTIC_CONTRACT_V0_1.md`
-- tested SDK: futu 10.08.6808; observed OpenD server version 1010.
-- controlled observations cover HK QUOTE/K_1M, including repeated updates to the same K_1M `time_key`, no explicit complete flag, and transition timing strongly supporting K_1M interval-end identity within that tested HK scope.
-- that contract explicitly forbids generalizing beyond the tested scope.
+- tested SDK: `futu 10.08.6808`; observed OpenD server version `1010`.
+- HK K_1M controlled observations show repeated same-key updates, no explicit complete flag, and timing strongly supporting interval-end identity within that tested HK scope only.
+
+Official exchange-calendar evidence may be used only to select a known early-close date for provider observation; it does **not** define Futu K-line construction. NYSE officially documented **2025-11-28** as a 1:00 p.m. Eastern early close (day after Thanksgiving), making it a suitable completed historical half-day for read-only Futu history inspection.
 
 ## Fact matrix
 
-| Required fact | Status | Evidence | Conclusion |
+| Required fact | Status | Evidence | Current implication |
 |---|---|---|---|
-| K_15M `time_key` means bar start | UNKNOWN | Official docs only say `Time` / `Candlestick time`. No start/end declaration. No controlled K_15M run in current evidence registry. | Cannot assert. |
-| K_15M `time_key` means bar end | UNKNOWN | Same. Existing K_1M empirical end-boundary evidence is K_1M/HK-only. | Cannot assert. |
-| K_60M `time_key` means bar start | UNKNOWN | Official docs only say `Time` / `Candlestick time`. No controlled K_60M run in current evidence registry. | Cannot assert. |
-| K_60M `time_key` means bar end | UNKNOWN | Same. | Cannot assert. |
-| US K_15M RTH bucket anchoring | UNKNOWN | Official docs define K_15M and US session selection but not bucket boundaries. | 09:30 vs clock-anchor cannot be inferred from documentation. |
-| US K_60M RTH bucket anchoring | UNKNOWN | Official docs define K_60M and RTH but do not state 09:30-anchor or clock-hour anchor. | Expected 60m sequence remains unknown. |
-| US regular trading session can be selected explicitly | VERIFIED | Official `Session.RTH` definition and historical/subscription session parameters. | Session scope can be explicit, but this does not define candle boundaries. |
-| Standard historical request excludes US pre/after-hours by default | VERIFIED | `extended_time=False` default and explicit session controls. | Default request must not be assumed to contain ETH data. |
-| US pre/after/overnight K-lines supported at <=60m when requested | VERIFIED | Official historical K-line restrictions and Session support. | Extended-hours currentness must be session-aware. |
-| Real-time K-line push may update a forming bar for K_1M | VERIFIED, TESTED SCOPE | Controlled HK K_1M evidence: repeated updates to same `time_key`, up to 38 pushes. | Current bar can be mutable for tested K_1M. |
-| Real-time K-line push may update a forming bar for K_15M | UNKNOWN | No official complete flag and no controlled K_15M observation. | Do not generalize K_1M behavior without evidence. |
-| Real-time K-line push may update a forming bar for K_60M | UNKNOWN | No controlled K_60M observation. | Do not generalize. |
-| K-line payload contains explicit closed/completed flag | VERIFIED NEGATIVE for documented/common KLine surface; K_1M empirically VERIFIED NEGATIVE | Official KLine schema has no documented closed/completed field; controlled K_1M raw payload also had none. | Completion cannot be taken from a provider completion flag on this surface. |
-| `get_cur_kline` includes the currently forming K_15M/K_60M bar | UNKNOWN | Docs do not explicitly specify whether newest returned row is forming or completed. | Must observe directly before relying on newest row as complete. |
-| `request_history_kline` includes today's currently forming K_15M/K_60M bar | UNKNOWN | Historical API docs do not define forming-bar inclusion/exclusion for current trading day. | Historical API cannot be treated as completed-bars-only without observation. |
-| first incomplete K_15M/K_60M bar behavior | UNKNOWN | No official statement / controlled evidence. | Do not derive currentness from first returned bar. |
-| market-close K_15M/K_60M final-bar behavior | UNKNOWN | Official market states document close time, not K-line finalization/bucket timestamp. | Final-bar closure semantics unresolved. |
-| half-day existence can be identified | VERIFIED | `TradeDateType.MORNING` / `AFTERNOON` / `WHOLE`. | Calendar can signal session shape. |
-| half-day K_15M/K_60M alignment/truncation | UNKNOWN | Trading-calendar docs do not specify candle construction on half days. | Must not manufacture expected sequence from normal-day cadence. |
-| temporary market close is fully represented by trading calendar | VERIFIED NEGATIVE | Futu explicitly says temporary market-closed data is not excluded by trading calendar. | Calendar alone is insufficient currentness authority. |
-
-## Currentness implications
-
-Until direct US K15/K60 evidence closes the required semantics:
-
-1. **Do not interpret K_15M/K_60M `time_key` as bar start or bar end yet.**
-2. **Do not freeze a US K_60M expected sequence yet.** In particular, do not assume either 09:30 anchoring or clock-hour anchoring.
-3. **Do not treat the newest historical intraday row as necessarily completed.**
-4. **Do not treat `time_key` change as a universal completion signal.** Existing K_1M evidence explicitly shows mutable forming-bar behavior and no completion flag.
-5. **Currentness must be session-aware.** RTH vs ETH/ALL changes the set of legitimate progress intervals.
-6. **Half days must be calendar/session-shape aware.** Normal-day expected cadence cannot simply be truncated by assumption.
-7. **Trading calendar alone cannot prove `PROGRESS_EXPECTED`**, because Futu documents that temporary closures are not removed from that calendar.
-8. Until the missing provider semantics are observed, the correct authority state is `CURRENTNESS_UNVERIFIED` / equivalent fail-closed evidence state — not an invented wall-clock threshold.
+| US `time_key` timezone = US Eastern by default | VERIFIED | Futu official K-line docs | Timezone normalization may use documented ET semantics while raw provider string remains preserved |
+| K_15M `time_key` = bar start | UNKNOWN | Official docs do not say | No completion rule from `time_key` |
+| K_15M `time_key` = bar end | UNKNOWN | Same | Same |
+| K_60M `time_key` = bar start | UNKNOWN | Same | Same |
+| K_60M `time_key` = bar end | UNKNOWN | Same | Same |
+| US K_60M 09:30 anchor | UNKNOWN | No official bucket-alignment contract | No expected 60m sequence may be frozen |
+| US K_60M clock-hour anchor | UNKNOWN | Same | Same |
+| K_15M forming-row mutation | UNKNOWN pending US observation | K_1M/HK cannot be generalized | Latest K_15M row cannot be presumed complete |
+| K_60M forming-row mutation | UNKNOWN pending US observation | Same | Latest K_60M row cannot be presumed complete |
+| `request_history_kline` exposes currently forming intraday row | UNKNOWN | Docs do not specify | Same-day history cannot be treated as completed-bars-only |
+| Documented KLine surface has explicit closed/completed flag | VERIFIED NEGATIVE OBSERVATION | No such documented field; K_1M controlled raw payload also had none | Completion cannot be read from a provider completion flag on this surface |
+| Standard historical request is non-extended by default | VERIFIED | Futu official docs | RTH and extended-hours evidence stay separate |
+| Extended-hours K-lines <=60m can be requested explicitly | VERIFIED | Futu official docs | Extended-hours currentness requires separate session modeling |
+| Half-day existence / early close can be known externally | VERIFIED at exchange-calendar layer | exchange calendar | Does not define Futu final bar identity |
+| Half-day K_15M/K_60M truncation/alignment | UNKNOWN | Requires Futu provider observation | Do not truncate normal-day cadence by assumption |
+| Futu trading calendar fully captures temporary market closures | VERIFIED NEGATIVE | official docs say temporary closures are not removed | Calendar alone cannot prove progress expected |
 
 ## Executable controlled empirical closure pack
 
-This branch contains three evidence-only tools. None is production code.
+All tools below are evidence-only and are not imported by production code.
 
-### A. `kline_timestamp_probe.py` — long live callback capture
+### A. `kline_timestamp_probe.py` — bounded live callback capture
 
-Purpose: observe raw US `K_15M` + `K_60M` transitions without mixing in blocking synchronous snapshot calls.
+Purpose: capture raw US K_15M/K_60M transitions without mixing blocking synchronous snapshot RPCs into the live path.
 
 - direct Futu SDK / local OpenD only;
 - explicit `Session.RTH`, `ETH`, or `ALL`;
-- captures raw callback payload, UTC receive time and monotonic receive time;
-- no periodic `get_cur_kline` or historical RPC during the live capture;
-- the whole provider child is bounded by a parent hard deadline;
-- timeout => incomplete evidence, never semantic promotion.
+- raw callback payload + UTC receive time + monotonic receive time;
+- parent-owned hard deadline;
+- timeout => incomplete evidence, not semantic promotion.
 
-Recommended normal-session capture:
+Example:
 
 ```bash
 cd tools/provider_semantics/futu
@@ -118,103 +80,114 @@ python kline_timestamp_probe.py \
   --symbol US.AAPL --session RTH --duration 4200
 ```
 
-Run separate captures spanning 09:30 ET open, midday transitions, 16:00 ET close, a known half-day close, and `Session.ALL` extended-hours control.
+### B. `kline_snapshot_probe.py` — independently bounded synchronous observations
 
-### B. `kline_snapshot_probe.py` — per-RPC bounded current/history observations
+Each `get_cur_kline` or `request_history_kline` observation executes in its **own child process** with an independent hard timeout. One blocked Futu call therefore invalidates one observation rather than destroying the entire evidence run.
 
-Each synchronous observation runs in its own child process with its own timeout:
+The probe now deliberately separates historical-date evidence from current/live evidence:
 
-- `request_history_kline(K_15M)`;
-- `request_history_kline(K_60M)`;
-- subscribe + `get_cur_kline(K_15M)`;
-- subscribe + `get_cur_kline(K_60M)`.
+- `--operations history|current|both`
+- `--history-trade-date YYYY-MM-DD`
 
-One hung SDK RPC therefore invalidates only that observation, not the entire evidence run.
+This prevents an old half-day history sample from being silently mixed with today's current K-line sample under one implied trading-date assumption.
 
-Same-day historical requests use `America/New_York` explicitly, preventing a Japan/Asia-local execution host from accidentally requesting the wrong trading date.
-
-Child result output uses a unique sentinel-prefixed JSON line, so incidental Futu/OpenD stdout logging cannot corrupt structured evidence parsing. Any other stdout is preserved separately as noise evidence.
-
-Example:
+Normal active-session forming-bar comparison:
 
 ```bash
 python kline_snapshot_probe.py \
   --host 127.0.0.1 --port 11111 \
   --symbol US.AAPL --session RTH \
+  --operations both \
   --repeat 3 --repeat-delay 120 --rpc-timeout 30
 ```
 
-Run `Session.ALL` separately. Repeated same-key value mutation is evidence candidate for a forming row; unchanged or absent rows do not by themselves prove completion semantics.
+Historical half-day-only capture:
+
+```bash
+python kline_snapshot_probe.py \
+  --host 127.0.0.1 --port 11111 \
+  --symbol US.AAPL --session RTH \
+  --operations history \
+  --history-trade-date 2025-11-28 \
+  --repeat 1 --rpc-timeout 30
+```
 
 ### C. `analyze_kline_timestamp_semantics.py` — offline mechanical analyzer
 
-Consumes raw live and snapshot evidence and reports only mechanical observations:
+The analyzer performs **no automatic VERIFIED promotion**. It reports observations that allow competing hypotheses to be adjudicated later:
 
 - first callback minus provider `time_key`;
-- first callback minus candidate interval start if the key is interpreted as interval end;
-- K_60M minute residue compatible with 09:30-anchor (`:30`) vs clock-hour (`:00`);
-- repeated material mutations under the same `time_key`;
-- same-key mutation across repeated historical/current snapshots.
+- first callback minus candidate interval start if key is interpreted as interval end;
+- K_60M minute residue compatible with `:30` vs `:00` candidate grids;
+- repeated material mutation under one `time_key`;
+- repeated same-key mutation across history/current snapshots;
+- full per-sample historical time-key sequence;
+- first/last time key;
+- consecutive key gaps;
+- nominal vs non-nominal gaps, including a potentially shortened half-day final interval.
 
-It deliberately emits `MECHANICAL_OBSERVATION_ONLY` and performs **no automatic VERIFIED promotion**.
+A non-nominal final gap is **reported, not normalized away**. The analyzer must not decide that it is valid, invalid, complete, or incomplete without provider evidence and review.
 
 ## Minimum discriminating evidence required
 
 ### K_15M start vs end
 
 Across multiple transitions:
-- START candidate predicts first callback for a key near that same key wall-clock;
-- END candidate predicts first callback near `time_key - 15 minutes`.
 
-A run that does not discriminate those competing hypotheses remains UNKNOWN/PARTIALLY_VERIFIED.
+- START candidate: first callback for a key clusters near the key wall-clock itself.
+- END candidate: first callback clusters near `time_key - 15 minutes`.
 
-### K_60M start vs end + RTH anchor
+Evidence that does not discriminate the candidates remains UNKNOWN/PARTIALLY_VERIFIED.
 
-Observe multiple transitions and preferably the first RTH bucket:
-- all key minutes at `:30` are compatible with a 09:30-anchored grid;
-- all key minutes at `:00` are compatible with a clock-hour grid;
-- first-callback timing against the key distinguishes start-like vs end-like behavior.
+### K_60M start vs end + RTH grid
 
-These are candidate patterns for empirical discrimination, not official contracts. Do not manufacture the final expected sequence until first and last RTH buckets are directly observed.
+Observe multiple transitions, preferably including first and last RTH buckets:
+
+- all key minutes `:30` are mechanically compatible with a 09:30-anchored candidate grid;
+- all key minutes `:00` are mechanically compatible with a clock-hour candidate grid;
+- callback timing relative to key distinguishes start-like vs end-like behavior.
+
+These remain empirical candidates, not provider contracts, until reviewed.
 
 ### Forming-bar behavior
 
-Same `time_key`, repeated callbacks, materially changing OHLCV/turnover before the next key => direct forming-bar evidence for that tested ktype/session scope.
+Same `time_key` + repeated callbacks/snapshots + materially changing OHLCV/turnover before next key = direct forming-row evidence for that tested ktype/session scope.
+
+A static row alone never proves completion.
 
 ### Historical API forming-row behavior
 
-Repeated same-day historical snapshots while a live bar is visibly forming: if the latest historical row retains the same key while material values change, that is discriminating evidence that the historical API exposes the forming row in the tested scope.
+Repeated same-day history snapshots during an active, visibly forming interval are required. If the same latest history key mutates materially, that is discriminating evidence that history exposes the forming row in that tested scope.
 
-### Market close / half day / extended hours
+### Half-day
 
-These require their own scoped observations. A normal midday run cannot close them by analogy.
+Use a confirmed exchange early-close date and run **history-only** provider observation. Record the actual K_15M/K_60M sequence and final key. Possible outcomes must all remain open until observed: shortened final bucket, full nominal bucket identity, omitted partial bucket, or another provider convention.
+
+### Extended hours
+
+RTH and extended-session packs must be captured and classified separately. Do not combine them into one universal currentness rule.
 
 ## Mechanics validation
 
-`tests/test_futu_kline_timestamp_semantics_tools.py` covers:
+`tests/test_futu_kline_timestamp_semantics_tools.py` now covers, among other cases:
 
-- 09:30-anchor vs clock-hour K60 mechanical classification;
-- end-boundary candidate timing math;
-- repeated same-key forming mutation detection;
-- repeated historical same-key mutation detection;
-- timeout exclusion from semantic comparison;
-- evidence tools parsing without importing the Futu SDK;
-- permanent separation of long live capture from synchronous periodic snapshot RPCs;
-- structured child-result recovery despite incidental SDK stdout noise;
-- last-sentinel-wins behavior if multiple structured lines appear.
+- 09:30-anchor vs clock-hour mechanical classification;
+- start/end-candidate timing math;
+- repeated same-key forming mutation candidates;
+- historical same-key mutation candidates;
+- timeout exclusion;
+- SDK-free parsing of evidence tools;
+- child-result recovery despite incidental SDK stdout noise;
+- live capture separation from synchronous periodic snapshot calls;
+- explicit history-only trade-date parsing;
+- malformed trade-date rejection;
+- preservation of full historical key sequence;
+- non-nominal final-gap reporting without semantic normalization.
 
-Research Radar CI is explicitly wired to execute this test file so an evidence-tool PR cannot appear green while skipping its own mechanics tests.
+CI validates **tool mechanics only**. CI PASS does not upgrade provider semantics.
 
-## Evidence-tool freeze boundary pending provider observation
+## Governance result
 
-The closure-pack mechanics are now intentionally stable enough for CI and external execution. Further code expansion should be driven by a concrete failed/incomplete provider run, not by speculative convenience features. Until live US K15/K60 evidence exists, this lane should prefer reviewing/collecting evidence over adding more harness surface.
+> **BLOCK freeze of authoritative K_15M/K_60M currentness timing rules until controlled US K_15M/K_60M provider observation closes the required semantic unknowns.**
 
-## Promotion / governance result
-
-This evidence task does **not** authorize a currentness implementation or threshold.
-
-Current recommendation to Radar main engineering / Architecture & Promotion Control Tower:
-
-> **BLOCK freeze of authoritative K_15M/K_60M currentness timing rules on provider-semantic grounds until controlled US K_15M/K_60M observation closes the unknowns above.**
-
-No production code changes are included in this report or closure pack.
+No production controller, adapter, Currentness, Continuity, RecoveryCandidate, strategy, AI, or trading code is changed by this evidence work.
