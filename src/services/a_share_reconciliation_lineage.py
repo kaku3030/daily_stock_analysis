@@ -73,7 +73,15 @@ def build_cn_realtime_reconciliation_view(
     if isinstance(source_tokens, (str, bytes)):
         raise ValueError("source_tokens must be an iterable of source-token strings")
 
-    tokens = tuple(source_tokens)
+    try:
+        tokens = tuple(source_tokens)
+    except TypeError as exc:
+        raise ValueError("source_tokens must be iterable") from exc
+
+    for token in tokens:
+        if not isinstance(token, str) or not token.strip() or token != token.strip():
+            raise ValueError("every source token must be a non-empty trimmed string")
+
     if len(tokens) != len(set(tokens)):
         raise ValueError("source_tokens must not contain duplicates")
 
@@ -81,9 +89,6 @@ def build_cn_realtime_reconciliation_view(
     grouped: dict[str, dict[str, list[str]]] = {}
 
     for position, token in enumerate(tokens):
-        if not isinstance(token, str) or not token.strip() or token != token.strip():
-            raise ValueError("every source token must be a non-empty trimmed string")
-
         lineage = CN_REALTIME_SOURCE_LINEAGE.get(token)
         if lineage is None:
             sources.append(
