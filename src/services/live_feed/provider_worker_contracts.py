@@ -141,7 +141,6 @@ def _require_aware_utc_canonicalizable(name: str, value: Any) -> None:
         raise ValueError(f"{name} has an unusable utcoffset()") from exc
     if offset is None:
         raise ValueError(f"{name} must have a usable utcoffset()")
-    # Canonicalizable to UTC must not raise.
     try:
         value.astimezone(timezone.utc)
     except Exception as exc:  # pragma: no cover - defensive
@@ -162,7 +161,6 @@ def _require_local_enqueue_seq(name: str, value: Any) -> None:
         raise ValueError(f"{name} must be None (pre-ingress) or a positive integer stamp")
 
 
-# Outcomes for which the command MUST have been dispatched (R3 §4.2).
 _DISPATCH_REQUIRED_OUTCOMES = frozenset(
     {
         ProviderExecutionOutcome.SUCCEEDED,
@@ -173,11 +171,6 @@ _DISPATCH_REQUIRED_OUTCOMES = frozenset(
         ProviderExecutionOutcome.PROTOCOL_ERROR,
     }
 )
-
-
-# ---------------------------------------------------------------------------
-# Frozen immutable domain types (exact field order per R3 / Slice A brief).
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -211,6 +204,15 @@ class ResolvedProviderCommandOutcome:
         _require_local_enqueue_seq("local_enqueue_seq", self.local_enqueue_seq)
         _require_non_negative_int("terminal_observed_at_monotonic_ns", self.terminal_observed_at_monotonic_ns)
         _require_aware_utc_canonicalizable("terminal_at_utc", self.terminal_at_utc)
+
+        for field_name in (
+            "provider_error_code",
+            "provider_error_message",
+            "diagnostic_reason",
+        ):
+            value = getattr(self, field_name)
+            if value is not None and not isinstance(value, str):
+                raise ValueError(f"{field_name} must be a str when present")
 
         if not isinstance(self.command, ProviderCommand):
             raise ValueError("command must be a ProviderCommand")
@@ -282,8 +284,6 @@ class ProviderWorkerLifecycleEvidence:
             _require_positive_int("process_pid", self.process_pid)
 
         if self.exit_code is not None:
-            # Exit code is diagnostic and may be negative/zero/positive per
-            # platform semantics; it must still be a real int, never a bool.
             if isinstance(self.exit_code, bool) or not isinstance(self.exit_code, int):
                 raise ValueError("exit_code must be an int when present (bool is rejected)")
 
@@ -314,7 +314,6 @@ class ProviderWorkerSupervisorConfig:
     protocol_version: int
 
     def __post_init__(self) -> None:
-        # Every timeout finite and > 0.
         startup_timeout = _require_finite_positive_float(
             "startup_timeout_seconds", self.startup_timeout_seconds
         )
@@ -328,7 +327,6 @@ class ProviderWorkerSupervisorConfig:
             "kill_join_timeout_seconds", self.kill_join_timeout_seconds
         )
 
-        # Capacities / frame / protocol: positive ints, bool rejected.
         for name in (
             "parent_command_queue_capacity",
             "child_data_queue_capacity",
@@ -342,7 +340,6 @@ class ProviderWorkerSupervisorConfig:
         if self.protocol_version < 1:
             raise ValueError("protocol_version must be >= 1")
 
-        # Exact command-timeout coverage over every current ProviderCommandType.
         if not isinstance(self.command_timeout_seconds, Mapping):
             raise ValueError("command_timeout_seconds must be a Mapping")
         command_timeouts: dict[ProviderCommandType, float] = {}
@@ -372,6 +369,4 @@ class ProviderWorkerSupervisorConfig:
         object.__setattr__(self, "graceful_shutdown_timeout_seconds", graceful_shutdown_timeout)
         object.__setattr__(self, "terminate_join_timeout_seconds", terminate_join_timeout)
         object.__setattr__(self, "kill_join_timeout_seconds", kill_join_timeout)
-        # Immutable/read-only storage: caller mutation cannot change config
-        # after construction (R3 §7.1).
         object.__setattr__(self, "command_timeout_seconds", MappingProxyType(dict(command_timeouts)))
