@@ -110,10 +110,12 @@ class DesiredSubscriptionRegistry:
     def set_control_plane_state(
         self, key: SemanticStreamKey, state: ControlPlaneState, *, binding_strength: BindingStrength | None = None
     ) -> DesiredRegistrySnapshot:
-        """Update the observed control-plane state for an existing entry.
+        """Annotate provider-observed control-plane state on existing intent.
 
         Raises KeyError if `key` is not currently desired -- this only
-        annotates an existing intent, it does not create one.
+        annotates an existing intent, it does not create one. Because this is
+        provider observation rather than desired-intent mutation, it MUST NOT
+        advance `desired_registry_revision`.
         """
 
         with self._lock:
@@ -124,7 +126,6 @@ class DesiredSubscriptionRegistry:
                 control_plane_state=state,
                 binding_strength=binding_strength if binding_strength is not None else entry.binding_strength,
             )
-            self._revision += 1
             return self._snapshot_locked()
 
     def snapshot(self) -> DesiredRegistrySnapshot:
