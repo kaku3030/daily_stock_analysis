@@ -76,21 +76,21 @@ Disposition vocabulary:
 - URL: https://github.com/HypothesisWorks/hypothesis
 - License: MPL-2.0 (repository metadata is not authoritative here; project source/contributor docs state MPL-2.0).
 - Radar problem: adversarial state-machine coverage for LiveFeed invariants and later Strategy Lab contracts.
-- Initial judgment: strong candidate for direct use as a test dependency rather than source-code harvesting.
-- Harvestable:
+- Initial judgment: strong candidate for direct use as a **test-only** dependency rather than source-code harvesting.
+- Harvested:
   - `RuleBasedStateMachine`;
   - rule preconditions and generated operation sequences;
   - invariants checked after arbitrary valid state transitions;
   - shrinking of failing state-machine traces to minimal reproducible cases.
-- Candidate Radar uses:
-  - generated add/remove/readd/stop/provider-event orderings;
-  - stale generation/provider/runtime evidence;
-  - queue saturation and repeated/duplicate events;
-  - control-plane revision races;
-  - future Currentness/Continuity candidate invalidation sequences.
-- Defect Audit focus: deterministic CI settings, reproducible seed/evidence capture, runtime cost, dependency policy.
-- Disposition: `DIRECT USE` candidate for tests.
-- Promotion: `EXTERNAL CANDIDATE`.
+- Radar adaptation:
+  - Draft PR #32: https://github.com/kaku3030/stock-razor/pull/32
+  - dependency is isolated to CI/test requirements, not production runtime requirements;
+  - generated LiveFeed add/remove/readd/stop/provider-event sequences exercise stale generation/provider/runtime evidence and lifecycle invariants.
+- Validation evidence observed:
+  - Research Radar Tests: PASS on PR #32 head;
+  - repository CI: PASS on PR #32 head.
+- Disposition: `DIRECT USE` for tests.
+- Promotion: `VALIDATING` — automated gates passed on the adapted PR head; Draft/manual review and merge governance remain separate.
 
 ### Shopify/toxiproxy
 - URL: https://github.com/Shopify/toxiproxy
@@ -117,17 +117,22 @@ Disposition vocabulary:
 - License: GPL-3.0
 - Radar problem: Strategy Validation Gate, temporal leakage and lookahead detection.
 - Initial judgment: high-value methodology source; crypto-specific engine and GPL coupling make wholesale/direct code adoption unattractive.
-- Harvestable:
-  - explicit `lookahead-analysis` workflow;
-  - recursive-analysis concepts for indicators/features;
-  - bias-test result structure and failure cases;
-  - CLI/test harness organization for repeatable strategy audits.
-- Defect Audit focus:
-  - adapt tests to equities/ETF timelines and Radar's multi-timeframe semantics;
-  - preserve Radar's own OOS/replay governance;
-  - avoid source copying unless licensing consequences are explicitly accepted.
-- Disposition: `TEST-REUSE` / method harvest.
-- Promotion: `EXTERNAL CANDIDATE`.
+- Harvested method:
+  - behavioral full-history vs sliced/prefix re-evaluation for lookahead detection;
+  - recursive/startup-history sensitivity analysis kept conceptually distinct from lookahead;
+  - explicit bias-test failure/control thinking;
+  - coverage caveat: a passing analysis proves only the paths/cutoffs exercised.
+- Radar-native adaptation:
+  - Draft PR #38: https://github.com/kaku3030/stock-razor/pull/38
+  - stdlib-only `audit_prefix_invariance` with fail-closed `lookahead` Hard Gate adaptation;
+  - separate `audit_startup_history_sensitivity` diagnosis;
+  - whole-series aggregate and next-row/negative-shift-equivalent adversarial fixtures;
+  - no Freqtrade source/code dependency and no GPL coupling.
+- Validation evidence at latest ledger sync:
+  - Research Radar focused tests: PASS and the new temporal-leakage test file is explicitly executed;
+  - repository main CI: still in progress at this sync point; do not call fully validated yet.
+- Disposition: `TEST-REUSE / METHOD HARVEST`.
+- Promotion: `VALIDATING` — focused gate passed, full repository CI pending.
 
 ### QuantConnect/Lean
 - URL: https://github.com/QuantConnect/Lean
@@ -180,23 +185,65 @@ Disposition vocabulary:
 - Disposition: `ADAPT / TEST-REUSE` pending deeper audit.
 - Promotion: `EXTERNAL CANDIDATE`.
 
-## First concrete repair produced by this lane
+## Concrete outputs already produced by this lane
 
-A separate Draft PR implements the first verified gap found while comparing the frozen Live Feed contract with current Slice-1 code:
+### LiveFeed Repair R1 — identity relevance
+
+Draft PR: https://github.com/kaku3030/stock-razor/pull/30
+
+Verified gap:
 
 - Frozen adversarial Case 6 says stale/old-generation provider callbacks cannot advance liveness/trust.
 - Current Slice-1 writer previously had no runtime/provider/controller-generation relevance gate before applying a provider event.
-- Harvest repair adds a minimal writer-side identity relevance gate and standalone regression coverage without implementing any future LIVE/Currentness/Continuity behavior.
+- Harvest repair adds a minimal writer-side identity relevance gate and standalone regression coverage without implementing future LIVE/Currentness/Continuity behavior.
 
-PR: https://github.com/kaku3030/daily_stock_analysis/pull/30
+Promotion truth: `ADAPTED` unless/until its own reproducible validation evidence is confirmed. Do not infer status from dependent/stacked PRs.
 
-Current promotion: `ADAPTED` only. It must not advance to `VALIDATING` until automated or otherwise reproducible tests/review are actually available and pass.
+### LiveFeed generative state-machine testing
 
-## Near-term harvesting priority
+Draft PR: https://github.com/kaku3030/stock-razor/pull/32
 
-1. LiveFeed state-machine property testing with Hypothesis.
-2. Network/provider fault matrix using Toxiproxy-style reproducible faults.
-3. Deeper Nautilus reconnect/resubscription test-fixture harvest.
-4. Freqtrade lookahead/recursive-analysis methodology mapped into Strategy Validation Gate.
-5. Lean transaction/fill/slippage test matrix for later Strategy Lab, not current production path.
-6. Qlib Experiment/Recorder ideas for Benchmark Harness / Model Evaluation Lab lineage.
+- Hypothesis is test-only.
+- Generated state-machine operations cover far more orderings than a fixed hand-written case matrix.
+- Automated Research Radar and repository CI gates have passed on the adapted head.
+
+Promotion truth: `VALIDATING`.
+
+### Data Reliability defect batch
+
+See: `DATA_RELIABILITY_HARVEST_BATCH_2026_09_09.md`
+
+Produced:
+
+- PR #35 — malformed provider numerics become explicit Health evidence instead of adapter crashes; current automated gates are green.
+- PR #36 — stale-good-health revocation for empty/invalid timestamp batches; stacked and still lacks independent CI.
+- deliberate non-adoption of Pandera/GX-style heavy schema tooling for local boundary-semantics defects.
+
+### Strategy Validation temporal-leakage batch
+
+See: `STRATEGY_VALIDATION_HARVEST_BATCH_2026_09_09.md`
+
+Produced:
+
+- PR #38 — implementation-level prefix-invariance audit + startup-history sensitivity audit;
+- permanent future-dependent implementation adversarial coverage;
+- CI execution-list repair so the new test cannot exist without actually running in the focused workflow.
+
+Promotion truth at latest sync: `VALIDATING` with focused suite PASS; main CI pending.
+
+## Remaining near-term harvesting priority
+
+Completed/advanced items are removed from the top of this queue rather than being repeatedly listed as future work.
+
+1. Network/provider fault matrix using Toxiproxy-style reproducible faults, but only if the environment can keep lifecycle cleanup deterministic.
+2. Deeper Nautilus reconnect/resubscription test-fixture harvest, especially transport-restored vs data-trusted separation.
+3. After #35 becomes the validated base, independently validate stacked Data R2 / PR #36.
+4. Lean transaction/fill/slippage test matrix for later Strategy Lab; no production execution scope expansion.
+5. Qlib Experiment/Recorder ideas for Benchmark Harness / Model Evaluation Lab lineage.
+6. vn.py gateway/provider-specific audit for China-market adapter ideas without importing auto-order scope.
+
+## Governing rule
+
+> Borrow aggressively. Trust nothing. Validate everything.
+
+Harvest increases Radar quality only when external ideas are translated into Radar-native contracts, adversarial evidence, and independently reproducible validation. Code volume, stars, framework breadth, or dependency count are not success metrics.
