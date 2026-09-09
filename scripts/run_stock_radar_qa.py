@@ -130,7 +130,11 @@ def run(
 
     if run_daily:
         daily_rows = [
-            DailyQA(queue).summarize(signal_type, day=current.date())
+            DailyQA(queue).summarize(
+                signal_type,
+                day=current.date(),
+                timezone_name=timezone_name,
+            )
             for signal_type in signal_types
         ]
         result["daily"] = daily_rows
