@@ -6,29 +6,35 @@ Scope: normalize provider capability/evidence for CN `15m` / `1H` K-line data be
 
 No implementation, routing, scoring, fallback, Currentness threshold, SHADOW/CORE, strategy, AI, or trading behavior is authorized by this document.
 
+## Current evidence correction
+
+Current external-provider evidence now confirms that **TickFlow full/API-key service exposes A-share minute K-lines including 15m and 60m**. The earlier Harvest note that authoritative external TickFlow 15m/1H capability evidence was unknown is historical and must not be treated as current truth.
+
+This correction changes only the external-capability fact. It does **not** verify TickFlow timestamp start/end semantics, forming-bar behavior, session/lunch semantics, or Currentness eligibility, and the current Stock Razor `TickFlowFetcher` remains daily-K-line oriented.
+
+Primary current evidence rule:
+
+> `external method exists != Radar capability implemented != provider semantics verified != Currentness authority`
+
 ## Why this contract is needed
 
-Current Stock Razor capability metadata is provider/dataset oriented (`quote.realtime`, `kline.daily`, etc.). External A-share sources already expose 15m/60m data in several ways, but method availability alone cannot answer:
+Current Stock Razor capability metadata is provider/dataset oriented (`quote.realtime`, `kline.daily`, etc.). External A-share sources expose 15m/60m data in several ways, but method availability alone cannot answer:
 
 - whether the source is actually wired into Radar;
 - whether two adapters are independent upstream evidence;
-- whether a timestamp names bar start, bar end, or something else;
+- whether a timestamp names bar start, bar end, or another provider-defined point;
 - whether the newest row is forming or complete;
-- whether 11:30–13:00 lunch break is represented as silence, a gap, or another provider convention;
-- whether values are adjusted and what the volume unit means;
+- how the 11:30–13:00 lunch break and exchange/session transitions are represented;
+- whether values are adjusted and what volume/amount units mean;
 - whether minute permission is actually entitled;
-- whether the call can block the caller indefinitely;
-- whether the data is historical-only, diagnostic, or eligible for Currentness authority.
-
-Therefore:
-
-> `method exists != capability admitted != semantic contract verified != Currentness authority`
+- whether a provider call can block the caller indefinitely;
+- whether a capability is historical-only, diagnostic, or eligible for Currentness authority.
 
 ## Relationship to existing frozen / validated work
 
 This candidate MUST reuse rather than duplicate:
 
-- PR #40 `RealtimeSourceLineage` / reconciliation independence substrate for `upstream_lineage_id` semantics;
+- PR #40 `RealtimeSourceLineage` / reconciliation-independence substrate for `upstream_lineage_id` semantics;
 - shared Data Health / Currentness architecture for final freshness authority;
 - provider-specific evidence discipline used in Futu semantics work;
 - malformed-vs-missing Data Reliability rule;
@@ -38,7 +44,7 @@ It MUST NOT create a provider-specific parallel Currentness engine.
 
 ## Proposed identity key
 
-One capability observation should be identified by the tuple:
+One capability observation should be identified by:
 
 `(provider_id, adapter_id, upstream_lineage_id, market, instrument_kind, interval, access_mode)`
 
@@ -47,12 +53,12 @@ Where:
 - `provider_id`: Radar provider identity, e.g. `tushare`, `akshare`, `pytdx`;
 - `adapter_id`: concrete Stock Razor adapter path;
 - `upstream_lineage_id`: independent upstream family from PR #40 semantics;
-- `market`: `cn` for this candidate;
+- `market`: `cn`;
 - `instrument_kind`: at minimum `STOCK | ETF | INDEX`;
 - `interval`: `15M | 1H`;
 - `access_mode`: one of the evidence categories below.
 
-Two capability records with different adapters but the same upstream lineage are **not independent corroboration**.
+Different adapters over the same upstream lineage are **not independent corroboration**.
 
 ## Proposed access-mode vocabulary
 
@@ -64,11 +70,9 @@ Design candidate only:
 - `HISTORICAL_REQUEST`
 - `LOCAL_FILE_HISTORY`
 
-Access mode must stay separate from Currentness eligibility. A `REALTIME_REQUEST` API may still be semantically insufficient for Currentness.
+Access mode stays separate from Currentness eligibility. A `REALTIME_REQUEST` endpoint may still be semantically insufficient for Currentness.
 
 ## Proposed evidence / semantics record
-
-A normalized capability record should expose these groups explicitly.
 
 ### A. Identity / scope
 
@@ -96,7 +100,7 @@ A normalized capability record should expose these groups explicitly.
   - `VERIFIED_UNAVAILABLE`
   - `UNKNOWN`
 
-A configured token/API key is not itself entitlement proof.
+A configured token/API key is not entitlement proof.
 
 ### C. Source timestamp semantics
 
@@ -110,21 +114,16 @@ A configured token/API key is not itself entitlement proof.
 - `timestamp_precision`
 - `cross_request_comparable: VERIFIED | PARTIAL | UNKNOWN`
 
-No start/end value may be filled from intuition or from another provider's behavior.
+No start/end value may be filled from intuition, sample appearance, another provider's behavior, or a third-party wrapper claim.
 
 ### D. Forming / completion semantics
 
-- `forming_bar_included`:
-  - `YES`
-  - `NO`
-  - `CONDITIONAL`
-  - `UNKNOWN`
-- `forming_bar_mutates_same_identity`:
-  - `YES | NO | UNKNOWN`
+- `forming_bar_included`: `YES | NO | CONDITIONAL | UNKNOWN`
+- `forming_bar_mutates_same_identity`: `YES | NO | UNKNOWN`
 - `completion_marker_field: str | NONE_OBSERVED | UNKNOWN`
 - `completion_inference_authorized: bool`
 
-`completion_inference_authorized=True` requires evidence; absence of a completion flag does not authorize a clock heuristic.
+`completion_inference_authorized=True` requires evidence. Absence of a completion flag does not authorize a clock heuristic.
 
 ### E. Session / expected-silence semantics
 
@@ -137,16 +136,11 @@ No start/end value may be filled from intuition or from another provider's behav
 - `zero_trade_interval_behavior`
 - `temporary_closure_authority`
 
-For A-shares, the 11:30–13:00 break must be explicitly modeled before simple wall-clock age can be used.
+Exchange trading hours are an input to this group, but exchange hours alone do not define provider bar construction.
 
 ### F. Price / volume semantics
 
-- `adjustment_mode`:
-  - `NONE`
-  - `FORWARD_ADJUSTED`
-  - `BACKWARD_ADJUSTED`
-  - `CALLER_SELECTABLE`
-  - `UNKNOWN`
+- `adjustment_mode`: `NONE | FORWARD_ADJUSTED | BACKWARD_ADJUSTED | CALLER_SELECTABLE | UNKNOWN`
 - `volume_unit`
 - `amount_unit`
 - `lot_size_semantics`
@@ -162,10 +156,7 @@ Malformed numeric evidence must remain distinguishable from genuinely missing va
 - `pagination_model`
 - `publication_delay_semantic`
 - `rate_limit_semantic`
-- `blocking_risk`:
-  - `BOUNDED_BY_PROVIDER`
-  - `CALLER_BOUNDED_ISOLATION_REQUIRED`
-  - `UNKNOWN`
+- `blocking_risk`: `BOUNDED_BY_PROVIDER | CALLER_BOUNDED_ISOLATION_REQUIRED | UNKNOWN`
 
 A caller-side thread timeout that leaves a blocking provider operation alive does not prove hard execution isolation.
 
@@ -177,13 +168,9 @@ A caller-side thread timeout that leaves a blocking provider operation alive doe
 - `provider_service_version` if known
 - `observed_symbol_scope[]`
 - `observed_date_scope[]`
-- `evidence_status`:
-  - `UNKNOWN`
-  - `PARTIALLY_VERIFIED`
-  - `VERIFIED_TESTED_SCOPE`
-  - `SOURCE_VERIFIED`
+- `evidence_status`: `UNKNOWN | PARTIALLY_VERIFIED | VERIFIED_TESTED_SCOPE | SOURCE_VERIFIED`
 
-Tool/test green status stays separate from provider evidence status.
+Tool/test green status remains separate from provider evidence status.
 
 ## Proposed Currentness eligibility state
 
@@ -198,13 +185,13 @@ Design candidate only; no production enum is authorized yet.
 
 All of the following must be non-UNKNOWN and evidenced for the exact provider/market/instrument/interval/access mode:
 
-1. provider/adaptor identity is explicit;
+1. provider/adapter identity is explicit;
 2. upstream lineage identity is explicit for reconciliation;
 3. runtime entitlement/capability is verified where required;
 4. source timestamp field and timezone are known;
 5. timestamp boundary semantic is known;
 6. forming-bar inclusion/completion behavior is known;
-7. morning/lunch/afternoon/close session behavior is known;
+7. morning/lunch/afternoon/close behavior is known;
 8. suspension / expected-silence behavior is bounded sufficiently to avoid false stale;
 9. adjustment and volume/amount units are known;
 10. malformed-vs-missing behavior is explicit;
@@ -219,72 +206,91 @@ Failure of any hard semantic gate must **not** be compensated by source count, c
 
 Reconciliation works over **independent upstream lineage groups**, not adapter count.
 
-Example:
+Examples:
 
 - Efinance 15m + AkShare EM 15m agreeing = one Eastmoney lineage observation, not two votes.
-- Tushare + TDX agreeing may be independent evidence if both capability records meet their own semantic gates.
+- Tushare + TDX agreeing may be independent evidence only if both capability records meet their own semantic gates.
 - unknown lineage remains visible for diagnostics but is not eligible to increase independence count.
 
 No numeric decision weighting is defined in V0.1.
 
-## Candidate mappings from current Harvest audit
+## Current candidate mappings
 
 ### Efinance / Eastmoney
 
-- external interval capability: 15m/60m exists upstream;
-- Radar implementation: current adapter daily-only;
+- external capability: `klt=15` and `klt=60` are documented;
+- current Stock Razor adapter: `klt=101` daily path only;
 - lineage: Eastmoney;
-- timestamp/forming/session semantics: not yet verified;
-- candidate eligibility now: `DIAGNOSTIC_ONLY` at best after adapter implementation; currently `NOT_IMPLEMENTED`.
+- timestamp/forming/session semantics: UNKNOWN for Currentness purposes;
+- current eligibility: `NOT_IMPLEMENTED` as Radar intraday capability.
 
-### AkShare Eastmoney minute routes
+### AkShare / Eastmoney minute routes
 
-- external interval capability: 15m/60m exists;
-- Radar implementation: current adapter daily-only;
-- lineage: Eastmoney;
-- must not corroborate Efinance as an independent source;
+- official AkShare docs expose A-share and ETF minute endpoints with `period` including `15` and `60`;
+- current Stock Razor AkShare fetch paths are daily-oriented;
+- lineage: Eastmoney for the EM minute route, therefore not independent from Efinance;
+- official wrapper docs expose a time field but do not define bar-start vs bar-end semantics;
 - current eligibility: not admitted.
 
 ### TDX / PyTDX / mootdx
 
-- protocol/wrapper interval capability: 15m/1h exists;
-- Radar PyTDX implementation: current fetch path daily-only;
-- lineage: TDX family candidate, distinct from Eastmoney/Tushare;
+- protocol/wrapper capability: category `1` = 15-minute and category `3` = 1-hour;
+- current Stock Razor PyTDX unified fetch path hard-codes daily category `9`;
+- lineage: TDX-family candidate, distinct from Eastmoney/Tushare;
 - timestamp/session/blocking semantics: require controlled audit;
 - current eligibility: not admitted.
 
 ### Tushare
 
-- official minute services expose A-share 15m/60m and current-day replay; ETF/index minute services also exist;
-- minute access requires explicit entitlement;
-- independent Tushare lineage;
-- timestamp/forming/session semantics still require target-scope evidence;
-- strong `CURRENTNESS_CANDIDATE` research lane after adapter + entitlement + semantic validation, not eligible yet.
+- official `rt_min` / `rt_min_daily` expose A-share 15MIN/60MIN;
+- official ETF minute services expose 15MIN/60MIN; historical ETF minute API exposes 15min/60min;
+- minute access requires explicit permission/entitlement;
+- documented output includes trading time plus OHLC, volume in shares and amount in yuan;
+- docs do not define aggregated bar timestamp as start vs end and do not close forming-bar semantics;
+- current Stock Razor Tushare history path is not an admitted 15m/1H contract;
+- current eligibility: strong `CURRENTNESS_CANDIDATE` research lane after adapter + entitlement + semantics validation, not eligible yet.
 
 ### BaoStock
 
-- external stock historical 15m/60m exists;
-- current Radar adapter daily-only;
-- minute data is a historical/backfill candidate, not assumed realtime;
-- likely target eligibility: `HISTORICAL_ONLY` unless provider evidence proves a different service contract.
+- provider ecosystem/source documentation exposes stock historical 15m/60m via `query_history_k_data_plus`; minute data carries `date,time,OHLC,volume,amount,adjustflag` and does not include index minute data;
+- current Stock Razor adapter is daily-only;
+- current Harvest has not established an official-provider realtime/current-day publication contract suitable for Currentness;
+- a third-party .NET implementation describes `time` as bar end, but that is **not accepted as provider-authoritative semantics** under this governance standard;
+- current eligibility: `HISTORICAL_ONLY` candidate unless controlled/provider-authoritative evidence proves more.
 
 ### TickFlow
 
-- current Radar adapter daily path confirmed;
-- authoritative external 15m/1h evidence remains UNKNOWN in current Harvest audit;
-- keep capability UNKNOWN rather than infer from a generic K-line API name.
+- **CURRENT CORRECTED FACT:** official TickFlow documentation says A-share minute K-lines support `1m/5m/15m/30m/60m` in the full API-key service; free service explicitly excludes minute K-lines;
+- official API also exposes current-day intraday K-line endpoints with `15m` / `60m` period options;
+- therefore external interval capability and API-key entitlement requirement are `SOURCE_VERIFIED`;
+- current Stock Razor `TickFlowFetcher` remains daily-K-line/realtime-quote oriented and does not admit these minute endpoints as `kline.15m` / `kline.1h`;
+- official docs expose `timestamp` / `trade_time`, but current Harvest evidence does not define their bar-start vs bar-end meaning or forming-bar completion semantics;
+- current eligibility: `NOT_IMPLEMENTED` in Radar; provider semantics still insufficient for Currentness.
+
+## Exchange-session authority already known
+
+For standard stock auction trading, current SSE rules define:
+
+- opening call auction: 09:15–09:25;
+- continuous auction: 09:30–11:30 and 13:00–14:57;
+- closing call auction: 14:57–15:00;
+- trading interruption does not automatically extend the trading day.
+
+SZSE publishes the same standard continuous-auction/lunch structure for securities.
+
+These exchange facts can define **session expectation inputs**. They do not define whether a provider's 15m/60m timestamp labels interval start/end, how a provider treats the closing call auction, or whether a current row is forming.
 
 ## Minimal implementation order if Control Tower accepts the shape
 
-This is a proposed order, not authorization:
+Proposed only, not authorization:
 
 1. freeze vocabulary/field shape in docs;
 2. implement immutable capability/evidence types only;
 3. expose read-only capability records through `DataCapabilityService` without routing changes;
 4. add anti-shrink and fail-closed tests;
-5. populate records only with currently proven facts; leave unknowns explicit;
+5. populate records only with proven facts; leave unknowns explicit;
 6. build provider-specific evidence harnesses;
-7. only after evidence closure, consider Currentness candidate integration;
+7. only after evidence closure, consider Currentness-candidate integration;
 8. routing/fallback/decision changes remain a separate promoted slice.
 
 ## Exit criteria for this design candidate
@@ -292,12 +298,12 @@ This is a proposed order, not authorization:
 Control Tower review should answer:
 
 - Does this duplicate an existing frozen model? If yes, merge/reuse rather than create a parallel type.
-- Is `upstream_lineage_id` sourced from the PR #40 substrate rather than redefined?
+- Is `upstream_lineage_id` sourced from PR #40 rather than redefined?
 - Are Currentness eligibility and provider evidence separate dimensions?
 - Are all UNKNOWN states fail-closed?
 - Is entitlement explicit rather than inferred from configuration?
 - Are lunch-break / suspension / forming-bar semantics first-class?
-- Is there any hidden compensatory scoring? There must not be.
+- Is there hidden compensatory scoring? There must not be.
 - Can the type be exposed read-only without changing routing?
 
 Until those questions are accepted, this remains `DESIGN:CANDIDATE`, not FROZEN.
