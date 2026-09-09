@@ -38,7 +38,7 @@ Status: ACTIVE SUB-LANE under the Stock Razor / Radar program.
 - Same-day historical observation derives date from `America/New_York`, not execution-host timezone.
 - Research Radar workflow has explicit path trigger + pytest execution for the closure-pack mechanics tests.
 - Semantic promotion remains manual/provider-evidence review only. The analyzer cannot self-declare VERIFIED.
-- Latest closure-pack branch head after hardening: `0951df223bd06f7e0036ed0f49a85546a9f7f689` before any later sync-only commit. Exact CI must be checked on the current PR head before claiming VALIDATING.
+- Current pre-CI branch head: `8bd99c51a69a36be225fbadbc339d31fe59fb7f1` before this sync-only commit. CI truth must be checked on the resulting current PR head; do not inherit earlier checks.
 
 ### Data Reliability
 - PR #35 — malformed provider numerics become explicit Health evidence; automated gates passed on validated head.
@@ -58,7 +58,7 @@ Status: ACTIVE SUB-LANE under the Stock Razor / Radar program.
 - Harvest terminology: #40 is `VALIDATING`, not SHADOW/CORE.
 
 ## Next Harvest priorities
-1. Finish CI/review hardening of PR #41 closure-pack mechanics.
+1. Verify current exact-head CI for PR #41 and repair any mechanics failure.
 2. Execute/review Futu US K15/K60 closure pack when a reachable OpenD + relevant US session window is available; keep currentness timing freeze blocked until then.
 3. A-share A0.2 additive DataCapability lineage exposure and reconciliation-safe tests, without routing changes.
 4. A-share intraday capability inventory for 15m/1H and currentness evidence boundaries.
