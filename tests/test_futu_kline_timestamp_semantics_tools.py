@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 FUTU_TOOLS = ROOT / "tools" / "provider_semantics" / "futu"
@@ -48,6 +50,7 @@ def test_k60_rth_0930_end_boundary_candidate_is_mechanically_visible() -> None:
     assert result["alignment_candidates"]["clock_hour_anchor_minute_00_matches_all"] is False
     assert result["first_callback_minus_time_key_seconds_summary"]["median"] < -3500
     assert abs(result["first_callback_minus_candidate_period_start_if_key_is_end_seconds_summary"]["median"]) < 5
+    assert result["sequence_observations"]["consecutive_key_gap_seconds"] == [3600.0]
     assert result["adjudication"] == "MECHANICAL_OBSERVATION_ONLY"
 
 
@@ -73,6 +76,21 @@ def test_repeated_same_key_material_change_is_forming_mutation_candidate() -> No
     assert result["per_key"][0]["callback_count"] == 3
     assert result["per_key"][0]["distinct_material_payload_count"] == 3
     assert result["alignment_candidates"]["rth_0930_vs_clock_quarter_discriminating"] is False
+
+
+def test_non_nominal_final_gap_is_reported_not_normalized_away() -> None:
+    events = [
+        _event("K_60M", "2025-11-28 10:30:00", "2025-11-28T14:30:01+00:00", 101.0, 1),
+        _event("K_60M", "2025-11-28 11:30:00", "2025-11-28T15:30:01+00:00", 102.0, 2),
+        _event("K_60M", "2025-11-28 12:30:00", "2025-11-28T16:30:01+00:00", 103.0, 3),
+        _event("K_60M", "2025-11-28 13:00:00", "2025-11-28T17:00:01+00:00", 104.0, 4),
+    ]
+    sequence = analyzer.analyze_live_events(events)["K_60M"]["sequence_observations"]
+    assert sequence["consecutive_key_gap_seconds"] == [3600.0, 3600.0, 1800.0]
+    assert sequence["all_consecutive_gaps_equal_nominal_interval"] is False
+    assert sequence["non_nominal_gap_seconds"] == [1800.0]
+    assert sequence["last_time_key"].endswith("13:00:00-05:00")
+    assert sequence["adjudication"] == "MECHANICAL_OBSERVATION_ONLY"
 
 
 def test_history_same_key_mutation_is_only_a_candidate_not_auto_verified() -> None:
@@ -111,6 +129,34 @@ def test_history_same_key_mutation_is_only_a_candidate_not_auto_verified() -> No
     result = analyzer.analyze_snapshot_document(document)["history:K_15M"]
     assert result["same_time_key_material_mutation"]["2026-09-09 10:00:00"] is True
     assert result["forming_bar_evidence_candidate"] == "PRESENT_IF_HISTORY_SAME_KEY_MUTATES"
+    assert result["adjudication"] == "MECHANICAL_OBSERVATION_ONLY"
+
+
+def test_history_full_sequence_is_preserved_for_half_day_review() -> None:
+    rows = [
+        {"time_key": "2025-11-28 10:30:00", "open": 100, "close": 101, "high": 101, "low": 99, "volume": 1, "turnover": 100},
+        {"time_key": "2025-11-28 11:30:00", "open": 101, "close": 102, "high": 102, "low": 100, "volume": 2, "turnover": 200},
+        {"time_key": "2025-11-28 12:30:00", "open": 102, "close": 103, "high": 103, "low": 101, "volume": 3, "turnover": 300},
+        {"time_key": "2025-11-28 13:00:00", "open": 103, "close": 104, "high": 104, "low": 102, "volume": 4, "turnover": 400},
+    ]
+    document = {
+        "observations": [
+            {
+                "requested_operation": "history",
+                "requested_ktype": "K_60M",
+                "result": {
+                    "completed": True,
+                    "timed_out": False,
+                    "child_result": {"status": "OK", "raw_rows": rows},
+                },
+            }
+        ]
+    }
+    result = analyzer.analyze_snapshot_document(document)["history:K_60M"]
+    assert result["sample_time_keys"] == [[row["time_key"] for row in rows]]
+    sequence = result["sample_sequence_observations"][0]
+    assert sequence["consecutive_key_gap_seconds"] == [3600.0, 3600.0, 1800.0]
+    assert sequence["non_nominal_gap_seconds"] == [1800.0]
     assert result["adjudication"] == "MECHANICAL_OBSERVATION_ONLY"
 
 
@@ -154,6 +200,24 @@ def test_capture_tools_parse_without_importing_futu_sdk() -> None:
     assert live.session == "RTH"
     assert snap.repeat == 1
     assert snap.session == "RTH"
+    assert snap.operations == "both"
+    assert snap.history_trade_date is None
+
+
+def test_snapshot_probe_supports_history_only_explicit_trade_date() -> None:
+    args = snapshot_probe.parse_args([
+        "--operations", "history",
+        "--history-trade-date", "2025-11-28",
+        "--repeat", "1",
+    ])
+    assert args.operations == "history"
+    assert args.history_trade_date == "2025-11-28"
+    assert snapshot_probe._selected_operations(args.operations) == ("history",)
+
+
+def test_snapshot_probe_rejects_malformed_history_trade_date() -> None:
+    with pytest.raises(SystemExit):
+        snapshot_probe.parse_args(["--history-trade-date", "11/28/2025"])
 
 
 def test_live_probe_does_not_offer_sync_snapshot_interval_anymore() -> None:
