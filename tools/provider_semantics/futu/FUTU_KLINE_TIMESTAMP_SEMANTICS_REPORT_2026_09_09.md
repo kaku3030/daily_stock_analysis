@@ -118,12 +118,7 @@ python kline_timestamp_probe.py \
   --symbol US.AAPL --session RTH --duration 4200
 ```
 
-Run separate captures spanning:
-- 09:30 ET open;
-- multiple midday transitions;
-- 16:00 ET close;
-- a known US half-day close;
-- `Session.ALL` for explicit extended-hours comparison.
+Run separate captures spanning 09:30 ET open, midday transitions, 16:00 ET close, a known half-day close, and `Session.ALL` extended-hours control.
 
 ### B. `kline_snapshot_probe.py` — per-RPC bounded current/history observations
 
@@ -137,6 +132,8 @@ Each synchronous observation runs in its own child process with its own timeout:
 One hung SDK RPC therefore invalidates only that observation, not the entire evidence run.
 
 Same-day historical requests use `America/New_York` explicitly, preventing a Japan/Asia-local execution host from accidentally requesting the wrong trading date.
+
+Child result output uses a unique sentinel-prefixed JSON line, so incidental Futu/OpenD stdout logging cannot corrupt structured evidence parsing. Any other stdout is preserved separately as noise evidence.
 
 Example:
 
@@ -186,8 +183,7 @@ Same `time_key`, repeated callbacks, materially changing OHLCV/turnover before t
 
 ### Historical API forming-row behavior
 
-Repeated same-day historical snapshots while a live bar is visibly forming:
-- if the latest historical row retains the same key while material values change, that is discriminating evidence that the historical API exposes the forming row in the tested scope.
+Repeated same-day historical snapshots while a live bar is visibly forming: if the latest historical row retains the same key while material values change, that is discriminating evidence that the historical API exposes the forming row in the tested scope.
 
 ### Market close / half day / extended hours
 
@@ -203,7 +199,9 @@ These require their own scoped observations. A normal midday run cannot close th
 - repeated historical same-key mutation detection;
 - timeout exclusion from semantic comparison;
 - evidence tools parsing without importing the Futu SDK;
-- permanent separation of long live capture from synchronous periodic snapshot RPCs.
+- permanent separation of long live capture from synchronous periodic snapshot RPCs;
+- structured child-result recovery despite incidental SDK stdout noise;
+- last-sentinel-wins behavior if multiple structured lines appear.
 
 Research Radar CI is explicitly wired to execute this test file so an evidence-tool PR cannot appear green while skipping its own mechanics tests.
 
