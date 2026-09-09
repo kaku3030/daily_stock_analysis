@@ -1,5 +1,5 @@
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -95,6 +95,83 @@ def test_validation_queue_rejects_naive_explicit_timestamps() -> None:
     )
     with pytest.raises(ValueError, match="timezone-aware"):
         queue.resolve(item.validation_id, "passed", resolved_at=naive)
+
+
+def test_validation_queue_rejects_falsy_non_datetime_timestamps() -> None:
+    queue = ValidationQueue()
+    for bad in (False, 0, ""):
+        with pytest.raises(ValueError, match="must be a datetime"):
+            queue.enqueue(
+                signal_id=f"bad-{bad!r}",
+                signal_type="breakout",
+                signal_state="confirmed",
+                created_at=bad,  # type: ignore[arg-type]
+            )
+
+    item = queue.enqueue(
+        signal_id="s-aware",
+        signal_type="breakout",
+        signal_state="confirmed",
+    )
+    for bad in (False, 0, ""):
+        with pytest.raises(ValueError, match="must be a datetime"):
+            queue.resolve(item.validation_id, "passed", resolved_at=bad)  # type: ignore[arg-type]
+
+
+def test_daily_qa_compares_legacy_offset_rows_by_instant_not_iso_text() -> None:
+    queue = ValidationQueue()
+    connection = queue._connection
+    rows = (
+        (
+            "legacy-before",
+            "legacy-before",
+            "breakout",
+            "confirmed",
+            "passed",
+            "{}",
+            "2026-09-09T23:59:59+08:00",
+            None,
+        ),
+        (
+            "legacy-inside",
+            "legacy-inside",
+            "breakout",
+            "confirmed",
+            "passed",
+            "{}",
+            "2026-09-10T00:00:01+08:00",
+            None,
+        ),
+        (
+            "legacy-next-boundary",
+            "legacy-next-boundary",
+            "breakout",
+            "confirmed",
+            "passed",
+            "{}",
+            "2026-09-11T00:00:00+08:00",
+            None,
+        ),
+    )
+    connection.executemany(
+        """
+        INSERT INTO stock_radar_validation_queue
+            (validation_id, signal_id, signal_type, signal_state, outcome,
+             evidence_json, created_at, resolved_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        rows,
+    )
+    connection.commit()
+
+    summary = DailyQA(queue).summarize(
+        "breakout",
+        day=date(2026, 9, 10),
+        timezone_name="Asia/Shanghai",
+    )
+
+    assert summary["total"] == 1
+    assert summary["passed"] == 1
 
 
 def test_seven_failures_in_last_ten_trigger_qa_alert_and_review() -> None:
