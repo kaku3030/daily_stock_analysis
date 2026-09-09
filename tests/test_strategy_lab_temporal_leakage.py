@@ -93,6 +93,53 @@ def test_next_row_signal_equivalent_to_negative_shift_is_detected() -> None:
     )
 
 
+def test_nondeterministic_full_baseline_is_indeterminate_not_lookahead() -> None:
+    calls = 0
+
+    def toggles(rows: Sequence[float]):
+        nonlocal calls
+        calls += 1
+        delta = float(calls % 2)
+        return [{"feature": value + delta} for value in rows]
+
+    report = audit_prefix_invariance(
+        history=(1.0, 2.0, 3.0, 4.0),
+        evaluator=toggles,
+        cutoffs=(1, 2),
+    )
+
+    assert report.status is TemporalLeakageStatus.INDETERMINATE
+    assert report.audited_cutoffs == ()
+    assert report.findings[0].code is TemporalAuditFindingCode.NONDETERMINISTIC_EVALUATOR
+    assert report.findings[0].changed_fields == ("feature",)
+    gate = temporal_leakage_gate_result(report)
+    assert gate.passed is False
+    assert gate.reason == "implementation_leakage_audit_indeterminate"
+
+
+def test_nondeterministic_prefix_is_not_mislabeled_as_future_dependency() -> None:
+    calls_by_length: dict[int, int] = {}
+
+    def unstable_only_on_short_windows(rows: Sequence[float]):
+        length = len(rows)
+        calls_by_length[length] = calls_by_length.get(length, 0) + 1
+        delta = 0.0 if length == 5 else float(calls_by_length[length] % 2)
+        return [{"feature": value + delta} for value in rows]
+
+    report = audit_prefix_invariance(
+        history=(1.0, 2.0, 3.0, 4.0, 5.0),
+        evaluator=unstable_only_on_short_windows,
+        cutoffs=(2, 3),
+    )
+
+    assert report.status is TemporalLeakageStatus.INDETERMINATE
+    assert report.audited_cutoffs == ()
+    assert {finding.code for finding in report.findings} == {
+        TemporalAuditFindingCode.NONDETERMINISTIC_EVALUATOR
+    }
+    assert temporal_leakage_gate_result(report).passed is False
+
+
 def test_evaluator_contract_failure_is_indeterminate_and_fails_closed() -> None:
     def missing_last_output(rows: Sequence[float]):
         return [{"feature": value} for value in rows[:-1]]
@@ -161,6 +208,27 @@ def test_recursive_startup_dependency_is_diagnosed_separately_from_lookahead() -
         finding.code is TemporalAuditFindingCode.OUTPUT_CHANGED_WITH_STARTUP_HISTORY
         for finding in report.findings
     )
+
+
+def test_nondeterministic_startup_reference_is_indeterminate_not_sensitivity() -> None:
+    calls = 0
+
+    def toggles(rows: Sequence[float]):
+        nonlocal calls
+        calls += 1
+        delta = float(calls % 2)
+        return [{"feature": value + delta} for value in rows]
+
+    report = audit_startup_history_sensitivity(
+        history=(1.0, 2.0, 3.0, 5.0, 8.0),
+        evaluator=toggles,
+        target_index=4,
+        history_lengths=(2, 3, 5),
+    )
+
+    assert report.status is StartupSensitivityStatus.INDETERMINATE
+    assert report.audited_history_lengths == ()
+    assert report.findings[0].code is TemporalAuditFindingCode.NONDETERMINISTIC_EVALUATOR
 
 
 def test_duplicate_cutoffs_and_history_lengths_are_rejected() -> None:
