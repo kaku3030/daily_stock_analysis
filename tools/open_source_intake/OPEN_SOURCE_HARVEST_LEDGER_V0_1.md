@@ -1,0 +1,202 @@
+# Open-Source Intake / Harvesting Ledger V0.1
+
+Status: RESEARCH LEDGER — non-production governance/evidence asset.
+
+This ledger records external engineering candidates against the current Radar frozen contracts and invariants. Entry in this file is **not** approval for production use. External maturity, stars, or official-provider status never bypass Defect Audit, Validation, Shadow Live, or the normal Promotion path.
+
+Promotion vocabulary:
+
+`EXTERNAL CANDIDATE -> ADAPTED -> VALIDATING -> SHADOW -> CORE`
+
+Disposition vocabulary:
+
+`DIRECT USE / ADAPT / TEST-REUSE / REJECT`
+
+## Current search map
+
+### Live Feed / Provider Reliability
+- live market data feed / streaming quote / realtime feed / market data client
+- subscription lifecycle / subscribe / unsubscribe / resubscribe / reconciliation
+- reconnect / retry / exponential backoff / jitter / heartbeat / connection state
+- provider acknowledgement / subscription ack / push handler / error semantics
+- freshness / staleness / currentness / liveness / watchdog
+- continuity / sequence gap / duplicate / out-of-order / missing event
+- replay / recovery / catch-up / snapshot+delta / backfill
+- event time / source time / receive time / observed time / monotonic clock
+- idempotency / deduplication / at-least-once / stale result
+- deterministic test / fake clock / fault injection / network partition
+
+### Strategy Lab / Validation
+- lookahead bias / temporal leakage / recursive indicator bias
+- walk-forward / purged cross-validation / embargo / CPCV
+- event-driven backtest / fill model / slippage / fee model / brokerage model
+- benchmark harness / experiment tracker / reproducibility / replay
+- property-based testing / state-machine testing / invariant testing
+
+## Intake batch 2026-09-09
+
+### FutunnOpen/py-futu-api
+- URL: https://github.com/FutunnOpen/py-futu-api
+- License: Apache-2.0
+- Radar problem: Futu/Moomoo provider mechanics, subscription lifecycle, reconnect/resubscribe semantics, provider blocking behavior.
+- Initial judgment: official provider SDK and primary semantics evidence source. Do not treat SDK transport recovery as controller recovery or LIVE qualification.
+- Harvestable:
+  - retained subscription registry pattern;
+  - autonomous reconnect/resubscribe behavior;
+  - official request/response and callback surfaces;
+  - provider-specific failure and blocking behavior for empirical probes.
+- Defects / risks already observed by Radar provider-semantics work:
+  - subscribe return is administrative evidence only;
+  - query-subscription visibility does not prove push delivery;
+  - successful unsubscribe is not a callback-drain barrier;
+  - autonomous reconnect uses provider-owned mechanics and cannot be equated with Radar recovery;
+  - synchronous provider calls can have unbounded blocking risk under fault conditions.
+- Disposition: `TEST-REUSE / ADAPT`
+- Promotion: existing provider evidence source; no production code promotion implied.
+
+### nautechsystems/nautilus_trader
+- URL: https://github.com/nautechsystems/nautilus_trader
+- License: LGPL-3.0
+- Radar problem: production-grade event-driven market-data lifecycle, reconnect, retained subscription replay, deterministic architecture.
+- Initial judgment: high-value architecture and test-method source; direct engine adoption is not justified for Radar's current Python architecture and frozen contracts.
+- Harvestable:
+  - reconnect backoff/max/jitter configuration patterns;
+  - retained subscription replay / `resubscribe_all` patterns;
+  - re-authentication-before-resubscribe sequencing where required;
+  - deterministic event-driven adapter boundaries;
+  - adapter failure/reconnect tests and fixtures.
+- Defect Audit focus:
+  - separate transport restoration from data trust;
+  - do not inherit provider-specific assumptions across venues;
+  - review LGPL implications before copying source rather than methods/tests.
+- Disposition: `ADAPT / TEST-REUSE`
+- Promotion: `EXTERNAL CANDIDATE`.
+
+### HypothesisWorks/hypothesis
+- URL: https://github.com/HypothesisWorks/hypothesis
+- License: MPL-2.0 (repository metadata is not authoritative here; project source/contributor docs state MPL-2.0).
+- Radar problem: adversarial state-machine coverage for LiveFeed invariants and later Strategy Lab contracts.
+- Initial judgment: strong candidate for direct use as a test dependency rather than source-code harvesting.
+- Harvestable:
+  - `RuleBasedStateMachine`;
+  - rule preconditions and generated operation sequences;
+  - invariants checked after arbitrary valid state transitions;
+  - shrinking of failing state-machine traces to minimal reproducible cases.
+- Candidate Radar uses:
+  - generated add/remove/readd/stop/provider-event orderings;
+  - stale generation/provider/runtime evidence;
+  - queue saturation and repeated/duplicate events;
+  - control-plane revision races;
+  - future Currentness/Continuity candidate invalidation sequences.
+- Defect Audit focus: deterministic CI settings, reproducible seed/evidence capture, runtime cost, dependency policy.
+- Disposition: `DIRECT USE` candidate for tests.
+- Promotion: `EXTERNAL CANDIDATE`.
+
+### Shopify/toxiproxy
+- URL: https://github.com/Shopify/toxiproxy
+- License: MIT
+- Radar problem: reproducible provider/network failure injection.
+- Initial judgment: strong external harness candidate; do not embed its Go implementation into Radar.
+- Harvestable:
+  - latency + jitter faults;
+  - timeout / partial-failure scenarios;
+  - TCP reset simulation;
+  - probabilistic toxicity for intermittent faults;
+  - repeatable network-fault fixtures for provider semantics and Shadow validation.
+- Candidate Radar uses:
+  - Futu/OpenD reconnect experiments;
+  - disconnect during subscribe/unsubscribe;
+  - delayed callback / stale result tests;
+  - recovery under asymmetric or intermittent connectivity.
+- Defect Audit focus: CI portability, process lifecycle cleanup, deterministic fault timing, environment isolation.
+- Disposition: `TEST-REUSE` / harness candidate.
+- Promotion: `EXTERNAL CANDIDATE`.
+
+### freqtrade/freqtrade
+- URL: https://github.com/freqtrade/freqtrade
+- License: GPL-3.0
+- Radar problem: Strategy Validation Gate, temporal leakage and lookahead detection.
+- Initial judgment: high-value methodology source; crypto-specific engine and GPL coupling make wholesale/direct code adoption unattractive.
+- Harvestable:
+  - explicit `lookahead-analysis` workflow;
+  - recursive-analysis concepts for indicators/features;
+  - bias-test result structure and failure cases;
+  - CLI/test harness organization for repeatable strategy audits.
+- Defect Audit focus:
+  - adapt tests to equities/ETF timelines and Radar's multi-timeframe semantics;
+  - preserve Radar's own OOS/replay governance;
+  - avoid source copying unless licensing consequences are explicitly accepted.
+- Disposition: `TEST-REUSE` / method harvest.
+- Promotion: `EXTERNAL CANDIDATE`.
+
+### QuantConnect/Lean
+- URL: https://github.com/QuantConnect/Lean
+- License: Apache-2.0
+- Radar problem: later backtest/execution realism and backtest-live parity.
+- Initial judgment: high-value reference for transaction-model interfaces; wholesale engine adoption is unnecessary at the current Foundation phase.
+- Harvestable:
+  - brokerage model boundaries;
+  - slippage models;
+  - fee models;
+  - fill/transaction simulation patterns;
+  - asset/broker-specific execution constraints and test matrices.
+- Defect Audit focus:
+  - avoid importing execution assumptions into current Candidate Discovery scope;
+  - keep Validation/Performance physically separated as frozen in Strategy Lab;
+  - model A-share/ETF constraints independently rather than assuming US-market semantics.
+- Disposition: `ADAPT / TEST-REUSE` for future Strategy Lab.
+- Promotion: `EXTERNAL CANDIDATE`.
+
+### microsoft/qlib
+- URL: https://github.com/microsoft/qlib
+- License: MIT
+- Radar problem: experiment tracking, reproducible research workflows, rolling research/evaluation, model artifact lineage.
+- Initial judgment: strong architecture/method source; do not replace Radar governance with Qlib's framework wholesale.
+- Harvestable:
+  - Experiment / Recorder abstraction;
+  - parameter + artifact logging;
+  - train/backtest analysis separation in workflows;
+  - rolling workflow patterns;
+  - reproducible experiment lineage.
+- Defect Audit focus:
+  - map Qlib experiment identity to Radar claim/evidence/gate versions rather than adopting opaque model-centric identity;
+  - maintain frozen Strategy Validation/Performance separation;
+  - ensure no implicit data leakage in custom dataset/feature adapters.
+- Disposition: `ADAPT / TEST-REUSE` for future Benchmark Harness / Model Evaluation Lab.
+- Promotion: `EXTERNAL CANDIDATE`.
+
+### vnpy/vnpy
+- URL: https://github.com/vnpy/vnpy
+- License: MIT
+- Radar problem: mature Python gateway boundaries and China-market quant/trading ecosystem patterns.
+- Initial judgment: useful ecosystem/reference candidate; deeper provider/gateway-specific audit is required before harvesting concrete reconnect semantics.
+- Harvestable now:
+  - gateway abstraction and subscription boundary patterns;
+  - China-market conventions and adapter organization;
+  - test cases around gateway/event-engine integration after deeper review.
+- Defect Audit focus:
+  - reconnect/resubscribe semantics are gateway-specific and must not be inferred from the generic engine call surface;
+  - avoid importing order-execution scope into Radar's current non-auto-trading architecture.
+- Disposition: `ADAPT / TEST-REUSE` pending deeper audit.
+- Promotion: `EXTERNAL CANDIDATE`.
+
+## First concrete repair produced by this lane
+
+A separate Draft PR implements the first verified gap found while comparing the frozen Live Feed contract with current Slice-1 code:
+
+- Frozen adversarial Case 6 says stale/old-generation provider callbacks cannot advance liveness/trust.
+- Current Slice-1 writer previously had no runtime/provider/controller-generation relevance gate before applying a provider event.
+- Harvest repair adds a minimal writer-side identity relevance gate and standalone regression coverage without implementing any future LIVE/Currentness/Continuity behavior.
+
+PR: https://github.com/kaku3030/daily_stock_analysis/pull/30
+
+Current promotion: `ADAPTED` only. It must not advance to `VALIDATING` until automated or otherwise reproducible tests/review are actually available and pass.
+
+## Near-term harvesting priority
+
+1. LiveFeed state-machine property testing with Hypothesis.
+2. Network/provider fault matrix using Toxiproxy-style reproducible faults.
+3. Deeper Nautilus reconnect/resubscription test-fixture harvest.
+4. Freqtrade lookahead/recursive-analysis methodology mapped into Strategy Validation Gate.
+5. Lean transaction/fill/slippage test matrix for later Strategy Lab, not current production path.
+6. Qlib Experiment/Recorder ideas for Benchmark Harness / Model Evaluation Lab lineage.
