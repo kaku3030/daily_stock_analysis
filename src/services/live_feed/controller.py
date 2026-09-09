@@ -518,6 +518,24 @@ class LiveFeedController:
                 self._lifecycle_state = LifecycleState.RECONNECTING
             elif event.event_kind is ProviderEventKind.ERROR:
                 self._failure_class = FailureClass.UNKNOWN
+            elif event.event_kind is ProviderEventKind.DATA:
+                # DATA is market-data ingress, not control evidence. Slice 1
+                # has no currentness/continuity consumer for it yet, so it
+                # reaching the writer is expected and is deliberately not
+                # flagged here (its loss already has an explicit
+                # INGRESS_LOSS overflow finding). No lifecycle or
+                # DeliveryMode semantics are implied.
+                pass
+            else:
+                # Fail-loud (frozen contract section 16): any other control /
+                # priority evidence kind that reaches the writer with no
+                # semantic handler (ENTITLEMENT, SUBSCRIPTION_RESULT,
+                # HEARTBEAT, TRANSPORT_RECONNECTING, or any future kind)
+                # must never be silently dropped. This emits an explicit
+                # diagnostic finding only -- no lifecycle mutation, no
+                # DeliveryMode / REALTIME inference, no authoritative
+                # state change.
+                self._findings.append(f"UNHANDLED_EVIDENCE_KIND:{event.event_kind.value}")
 
     def _transition_lifecycle_state(self, new_state: LifecycleState) -> None:
         """Guarded transition primitive. No caller in this module ever
