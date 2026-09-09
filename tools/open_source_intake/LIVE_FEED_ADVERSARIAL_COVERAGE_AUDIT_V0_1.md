@@ -6,14 +6,15 @@ Purpose: prevent false-green reporting while Slice 1 is intentionally incomplete
 
 ## Status vocabulary
 
-- `ENFORCED+TESTED` — the relevant Slice-1 invariant is implemented and has focused regression coverage on main.
-- `ADAPTED-PENDING-VALIDATION` — a concrete repair/test exists in a Draft Harvest PR but is not yet validated/merged.
+- `ENFORCED+TESTED` — the relevant invariant is implemented on the audited code line and has focused regression coverage on main.
+- `VALIDATING-DRAFT` — a concrete repair/test exists in a Draft Harvest PR and the exact PR head has passed its own automated validation, but the repair is not merged to main.
+- `ADAPTED-PENDING-VALIDATION` — a concrete repair/test exists in a Draft Harvest PR but has not yet passed its own reproducible validation.
 - `STRUCTURAL-ONLY` — current architecture prevents the forbidden outcome incidentally/structurally, but the case's full semantics are not implemented.
 - `PARTIAL` — some required identity/control behavior exists, but later recovery/reconciliation semantics remain absent.
 - `PROVIDER-EVIDENCE` — provider semantics have empirical/source evidence, but controller behavior is not yet implemented.
 - `DEFERRED-BY-FROZEN-SCOPE` — requires a capability explicitly deferred beyond Slice 1 (Currentness, Continuity, RecoveryCandidate, entitlement, ClockTrust, cache trust, session semantics, etc.).
 
-No `STRUCTURAL-ONLY`, `PARTIAL`, `PROVIDER-EVIDENCE`, or `DEFERRED-BY-FROZEN-SCOPE` row may be reported as a completed permanent adversarial case.
+No `VALIDATING-DRAFT`, `ADAPTED-PENDING-VALIDATION`, `STRUCTURAL-ONLY`, `PARTIAL`, `PROVIDER-EVIDENCE`, or `DEFERRED-BY-FROZEN-SCOPE` row may be reported as merged/current-main enforcement.
 
 ## Coverage matrix
 
@@ -24,7 +25,7 @@ No `STRUCTURAL-ONLY`, `PARTIAL`, `PROVIDER-EVIDENCE`, or `DEFERRED-BY-FROZEN-SCO
 | 3 | Provider ACK but no data | STRUCTURAL-ONLY | No ACK→LIVE path exists; future control-plane attribution and data-plane qualification still required. |
 | 4 | Reconnect without replaying desired subscriptions | STRUCTURAL-ONLY | Reconnect can reach CONNECTED but not LIVE. Desired-vs-provider reconciliation is not implemented. |
 | 5 | Administrative resubscribe success, no qualified progress | STRUCTURAL-ONLY | No LIVE promotion exists. Currentness/Continuity qualification remains deferred. |
-| 6 | Old-generation callback after newer generation | ADAPTED-PENDING-VALIDATION | PR #30 adds runtime/provider/generation relevance gate; PR #32 generates stale-identity sequences. Not merged/validated yet. |
+| 6 | Old-generation callback after newer generation | VALIDATING-DRAFT | PR #30 adds runtime/provider/generation relevance gate and its exact head has passed Research Radar + repository CI. PR #32 stress-tests stale-identity sequences with Hypothesis and its exact head also passed both automated suites. Neither PR is merged to main yet, so main enforcement must not be claimed. |
 | 7 | QUOTE healthy, required 1M bar stalled | DEFERRED-BY-FROZEN-SCOPE | Requires per-stream liveness/dependency and final health aggregation. |
 | 8 | Fresh receive time, stuck source progress | DEFERRED-BY-FROZEN-SCOPE | Requires provider ProgressIdentity + Currentness. |
 | 9 | Historical SEED fills realtime cache | DEFERRED-BY-FROZEN-SCOPE | Requires cache trust/provenance and live qualification. |
@@ -38,7 +39,7 @@ No `STRUCTURAL-ONLY`, `PARTIAL`, `PROVIDER-EVIDENCE`, or `DEFERRED-BY-FROZEN-SCO
 | 17 | NTP wall-clock jump | DEFERRED-BY-FROZEN-SCOPE | Requires monotonic timeout model + ClockTrust reassessment. |
 | 18 | Lunch break / expected silence | DEFERRED-BY-FROZEN-SCOPE | Requires session/trading-expectation input. |
 | 19 | Legitimate zero-trade silence | DEFERRED-BY-FROZEN-SCOPE | Requires trading expectation and provider cadence semantics. |
-| 20 | Shutdown disconnect/reconnect race | ENFORCED+TESTED | STOP is writer-serialized; post-stop CONNECTED is ignored; post-stop DISCONNECTED resolves cleanly; focused tests exist. |
+| 20 | Shutdown disconnect/reconnect race | ENFORCED+TESTED | STOP is writer-serialized; post-stop CONNECTED is ignored; post-stop DISCONNECTED resolves cleanly; focused tests exist on main. |
 | 21 | Catch-up newer than old watermark but not current | DEFERRED-BY-FROZEN-SCOPE | Requires CurrentnessBoundary. |
 | 22 | Duplicate last pre-loss event | DEFERRED-BY-FROZEN-SCOPE | Requires ProgressIdentity comparator and recovery candidate. |
 | 23 | Same progress identity, changed payload correction | DEFERRED-BY-FROZEN-SCOPE | Requires correction-vs-progress semantics and Continuity. |
@@ -46,7 +47,7 @@ No `STRUCTURAL-ONLY`, `PARTIAL`, `PROVIDER-EVIDENCE`, or `DEFERRED-BY-FROZEN-SCO
 | 25 | One stream silently revoked | DEFERRED-BY-FROZEN-SCOPE | Requires per-stream control/data-plane health. |
 | 26 | One-symbol permission rejection | DEFERRED-BY-FROZEN-SCOPE | Requires per-symbol failure/health aggregation. |
 | 27 | Machine suspend/resume clock discontinuity | DEFERRED-BY-FROZEN-SCOPE | Requires ClockTrust discontinuity handling. |
-| 28 | Process restart with stale persisted trust | PARTIAL | `runtime_instance_id` exists and PR #30 blocks foreign runtime evidence; durable cache/trust reset remains future work. |
+| 28 | Process restart with stale persisted trust | PARTIAL | `runtime_instance_id` exists and Draft PR #30 blocks foreign runtime evidence; durable cache/trust reset remains future work. |
 | 29 | Desired registry changes during recovery | PARTIAL | Monotonic desired revision and stale-command-result helper exist; full reconciliation/result-application policy is not implemented. |
 | 30 | Recovery during CLOSED_SESSION | DEFERRED-BY-FROZEN-SCOPE | Requires session phase + RecoveryCandidate. |
 | 31 | Future provider timestamp / clock error | DEFERRED-BY-FROZEN-SCOPE | Requires ClockTrust/currentness evaluation. |
@@ -73,8 +74,8 @@ No `STRUCTURAL-ONLY`, `PARTIAL`, `PROVIDER-EVIDENCE`, or `DEFERRED-BY-FROZEN-SCO
 ## Audit conclusions
 
 1. **Do not report 50/50.** Slice 1 intentionally cannot satisfy most semantic recovery cases yet.
-2. The strongest completed Slice-1 areas are structural single-writer/immutable publication, shutdown ordering (Case 20), and intent incarnation bookkeeping (Case 32).
-3. Case 6 was a real enforcement hole despite the frozen contract; Harvest PR #30 repairs it and Harvest PR #32 stress-tests it with generated sequences.
+2. The strongest completed mainline Slice-1 areas are structural single-writer/immutable publication, shutdown ordering (Case 20), and intent incarnation bookkeeping (Case 32).
+3. Case 6 was a real enforcement hole despite the frozen contract. Draft PR #30 repairs it and Draft PR #32 stress-tests it; both exact heads have passed their own automated validation, but neither is merged, so Case 6 remains `VALIDATING-DRAFT` rather than `ENFORCED+TESTED` on main.
 4. Futu provider research already supplies valuable evidence for Cases 2, 10, 34, 37, 41, and 46, but evidence is not controller enforcement.
 5. The next permanent-suite conversion targets should be chosen when their owning capability enters implementation. Current priority remains: identity/relevance → provider fault harness → Currentness/Continuity prerequisites, without premature LIVE promotion.
 
@@ -82,9 +83,9 @@ No `STRUCTURAL-ONLY`, `PARTIAL`, `PROVIDER-EVIDENCE`, or `DEFERRED-BY-FROZEN-SCO
 
 A row may move to `ENFORCED+TESTED` only when all of the following exist:
 
-- relevant production invariant is implemented (not merely incidentally true because a later state is unreachable);
+- relevant production invariant is implemented on main (not merely incidentally true because a later state is unreachable);
 - focused deterministic regression coverage exists;
 - where sequence/state explosion matters, adversarial/property coverage exists or is explicitly judged unnecessary;
 - provider-dependent assumptions are backed by the Provider Semantic Contract at an appropriate confidence level;
-- CI/reproducible validation passes;
+- CI/reproducible validation passes on the exact code being promoted;
 - the implementation does not weaken a frozen invariant or silently infer UNKNOWN semantics.
