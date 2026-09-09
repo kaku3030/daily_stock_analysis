@@ -6,10 +6,11 @@ import json
 import sqlite3
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from .config import StockRadarConfig, load_stock_radar_config
 from .notifications import RadarNotifier
@@ -222,15 +223,39 @@ class DailyQA:
     def __init__(self, queue: ValidationQueue) -> None:
         self.queue = queue
 
-    def summarize(self, signal_type: str, *, day: date | None = None) -> dict[str, Any]:
-        target = (day or datetime.now(timezone.utc).date()).isoformat()
+    def summarize(
+        self,
+        signal_type: str,
+        *,
+        day: date | None = None,
+        timezone_name: str = "UTC",
+    ) -> dict[str, Any]:
+        """Summarize one reporting *local calendar day* over UTC-stored rows.
+
+        ValidationQueue timestamps are stored as timezone-aware UTC ISO text.
+        A reporting day, however, belongs to the caller's configured market/
+        reporting timezone.  Comparing ``YYYY-MM-DD`` substrings from those
+        two clock domains drops valid rows around local midnight.  Convert
+        both local-midnight boundaries to UTC and query the half-open interval
+        instead.  This also keeps DST-capable zones correct without a fixed
+        hour-offset assumption.
+        """
+
+        zone = ZoneInfo(timezone_name)
+        target_day = day or datetime.now(zone).date()
+        local_start = datetime.combine(target_day, time.min, tzinfo=zone)
+        local_end = datetime.combine(target_day + timedelta(days=1), time.min, tzinfo=zone)
+        start_utc = local_start.astimezone(timezone.utc).isoformat()
+        end_utc = local_end.astimezone(timezone.utc).isoformat()
+        target = target_day.isoformat()
+
         rows = self.queue._connection.execute(
             """
             SELECT outcome, COUNT(*) AS count FROM stock_radar_validation_queue
-            WHERE signal_type = ? AND substr(created_at, 1, 10) = ?
+            WHERE signal_type = ? AND created_at >= ? AND created_at < ?
             GROUP BY outcome
             """,
-            (signal_type, target),
+            (signal_type, start_utc, end_utc),
         ).fetchall()
         counts = {str(row["outcome"]): int(row["count"]) for row in rows}
         return {
