@@ -1,33 +1,41 @@
 """Implementation-level temporal leakage audits for Strategy Lab V0.1.
 
-This module complements the declarative temporal contracts already present in
-Strategy Lab.  A caller can declare honest-looking timestamps while an
-indicator or signal implementation still reads future rows (for example via a
-negative shift, an unbounded whole-series aggregate, or a future fill).  The
-prefix-invariance audit detects that class of defect behaviorally:
+Strategy Lab already governs declared timestamps, information dependencies,
+walk-forward separation, and OOS use.  Those declarations are necessary but
+cannot prove that an indicator or signal implementation itself did not read
+future rows.  This module adds a behavioral audit without depending on any
+specific dataframe or backtest framework.
 
-1. evaluate the implementation once with the full history;
-2. re-evaluate it with an exact prefix ending at an audited cutoff; and
-3. compare the output at that cutoff.
+Prefix invariance
+-----------------
+For each audited cutoff, evaluate the same implementation with:
 
-If data after the cutoff changes an output that should already be fixed at the
-cutoff, the implementation is future-dependent.
+1. the full available history; and
+2. the exact prefix ending at the cutoff.
 
-A separate startup-history sensitivity audit reruns the same endpoint with
-multiple history lengths.  That detects recursive/warmup instability but does
-*not* call it look-ahead by itself.  Keeping the two diagnoses separate avoids
-turning an insufficient-warmup problem into a false accusation of future data
-access.
+An output at the cutoff that changes only because rows after the cutoff were
+made visible is evidence of future dependency.
 
-The harness is framework-neutral and stdlib-only.  Evaluators return one
-snapshot per input row.  Snapshot values are deliberately restricted to
-simple finite scalar values and compared exactly.  Callers that need a numeric
-tolerance must canonicalize/round inside their evaluator so the comparison
-policy is explicit rather than a hidden Strategy Lab threshold.
+Determinism control
+-------------------
+Every comparison input is evaluated twice first.  If identical input produces
+different output, the audit reports ``INDETERMINATE`` with
+``NONDETERMINISTIC_EVALUATOR``.  Nondeterminism therefore fails the Hard Gate
+closed but is never mislabeled as look-ahead.
 
-A PASS certifies only the requested cutoffs/history lengths exercised by this
-audit.  It is never proof that no other path, signal, market regime, or cutoff
-can leak.
+Startup-history sensitivity
+---------------------------
+A separate audit compares the same endpoint with different amounts of prior
+history.  This diagnoses recursive/warmup instability independently from
+look-ahead; insufficient convergence is not proof of future-data access.
+
+Evaluators return one finite scalar snapshot per input row.  Comparison is
+exact in V0.1.  Callers that require numeric tolerance must canonicalize or
+round explicitly inside the evaluator so tolerance never becomes a hidden
+Strategy Lab policy.
+
+A PASS certifies only the requested cutoffs and executed paths.  It is never a
+global proof that an implementation cannot leak elsewhere.
 """
 
 from __future__ import annotations
@@ -35,7 +43,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from math import isfinite
-from typing import Any, Callable, Iterable, Mapping, Sequence, TypeAlias, TypeVar
+from typing import Callable, Iterable, Mapping, Sequence, TypeAlias, TypeVar
 
 from .validation_models import GateResult
 
@@ -43,6 +51,7 @@ from .validation_models import GateResult
 Scalar: TypeAlias = str | int | float | bool | None
 Snapshot: TypeAlias = Mapping[str, Scalar]
 NormalizedSnapshot: TypeAlias = tuple[tuple[str, Scalar], ...]
+NormalizedOutputs: TypeAlias = tuple[NormalizedSnapshot, ...]
 T = TypeVar("T")
 TemporalEvaluator: TypeAlias = Callable[[Sequence[T]], Iterable[Snapshot]]
 
@@ -62,6 +71,7 @@ class StartupSensitivityStatus(str, Enum):
 class TemporalAuditFindingCode(str, Enum):
     OUTPUT_CHANGED_WITH_FUTURE_TAIL = "output_changed_with_future_tail"
     OUTPUT_CHANGED_WITH_STARTUP_HISTORY = "output_changed_with_startup_history"
+    NONDETERMINISTIC_EVALUATOR = "nondeterministic_evaluator"
     EVALUATOR_ERROR = "evaluator_error"
     OUTPUT_CONTRACT_ERROR = "output_contract_error"
     OUTPUT_LENGTH_MISMATCH = "output_length_mismatch"
@@ -126,19 +136,13 @@ def audit_prefix_invariance(
     evaluator: TemporalEvaluator[T],
     cutoffs: Sequence[int],
 ) -> TemporalLeakageReport:
-    """Detect future-dependent implementation output using prefix invariance.
+    """Detect implementation future-dependency with black-box prefix replay.
 
-    ``evaluator`` receives a history slice and must return exactly one snapshot
-    per input row.  For each requested cutoff ``c`` this function compares the
-    full-history output at row ``c`` with the final output produced when the
-    evaluator sees only ``history[:c + 1]``.
-
-    Every cutoff must leave at least one future row hidden (``c < len(history)-1``);
-    auditing the final row would be a vacuous comparison with no future tail.
-    Malformed inputs raise ``ValueError``.  Evaluator/runtime/output-contract
-    failures are audit evidence and produce ``INDETERMINATE`` rather than a
-    false PASS.  A definite mismatch dominates indeterminate findings and
-    yields ``LEAKAGE_DETECTED``.
+    The evaluator must return exactly one snapshot per input row.  Every audit
+    cutoff must leave at least one row in the hidden future tail.  Malformed
+    caller inputs raise ``ValueError``.  Runtime/output-contract/nondeterminism
+    findings produce ``INDETERMINATE`` unless a separately stable comparison
+    proves leakage at another cutoff, in which case definite leakage dominates.
     """
 
     rows = _require_history(history, minimum_size=2)
@@ -146,7 +150,7 @@ def audit_prefix_invariance(
     if not callable(evaluator):
         raise ValueError("evaluator must be callable")
 
-    baseline, baseline_finding = _run_evaluator(
+    baseline, baseline_finding = _run_stable_evaluator(
         evaluator=evaluator,
         history=rows,
         expected_length=len(rows),
@@ -168,7 +172,7 @@ def audit_prefix_invariance(
 
     for cutoff in requested:
         prefix = rows[: cutoff + 1]
-        prefix_outputs, finding = _run_evaluator(
+        prefix_outputs, finding = _run_stable_evaluator(
             evaluator=evaluator,
             history=prefix,
             expected_length=len(prefix),
@@ -185,12 +189,11 @@ def audit_prefix_invariance(
         prefix_snapshot = prefix_outputs[-1]
         if full_snapshot != prefix_snapshot:
             leakage_found = True
-            changed = _changed_fields(full_snapshot, prefix_snapshot)
             findings.append(
                 TemporalAuditFinding(
                     code=TemporalAuditFindingCode.OUTPUT_CHANGED_WITH_FUTURE_TAIL,
                     cutoff=cutoff,
-                    changed_fields=changed,
+                    changed_fields=_changed_fields(full_snapshot, prefix_snapshot),
                     message=(
                         "output at cutoff changed when rows after the cutoff were hidden"
                     ),
@@ -220,13 +223,12 @@ def audit_startup_history_sensitivity(
     target_index: int,
     history_lengths: Sequence[int],
 ) -> StartupSensitivityReport:
-    """Detect endpoint sensitivity to how much prior history was supplied.
+    """Detect endpoint sensitivity to the amount of prior startup history.
 
     Every run ends at ``target_index`` but starts at a different earlier row.
-    The longest requested history is the reference.  A mismatch is reported as
-    startup-history sensitivity, not look-ahead.  This is suitable for
-    diagnosing warmup/recursive instability before deciding whether more
-    history or a strategy-specific fix is required.
+    The longest requested history is the reference.  Every window is replayed
+    twice before comparison so nondeterminism is ``INDETERMINATE`` rather than
+    mislabeled startup sensitivity.
     """
 
     rows = _require_history(history, minimum_size=2)
@@ -240,7 +242,7 @@ def audit_startup_history_sensitivity(
     lengths = _normalize_history_lengths(history_lengths, target_index + 1)
     reference_length = max(lengths)
     reference_slice = rows[target_index + 1 - reference_length : target_index + 1]
-    reference_outputs, reference_finding = _run_evaluator(
+    reference_outputs, reference_finding = _run_stable_evaluator(
         evaluator=evaluator,
         history=reference_slice,
         expected_length=reference_length,
@@ -266,7 +268,7 @@ def audit_startup_history_sensitivity(
         if history_length == reference_length:
             continue
         window = rows[target_index + 1 - history_length : target_index + 1]
-        outputs, finding = _run_evaluator(
+        outputs, finding = _run_stable_evaluator(
             evaluator=evaluator,
             history=window,
             expected_length=history_length,
@@ -282,12 +284,11 @@ def audit_startup_history_sensitivity(
         snapshot = outputs[-1]
         if snapshot != reference_snapshot:
             sensitivity_found = True
-            changed = _changed_fields(reference_snapshot, snapshot)
             findings.append(
                 TemporalAuditFinding(
                     code=TemporalAuditFindingCode.OUTPUT_CHANGED_WITH_STARTUP_HISTORY,
                     history_length=history_length,
-                    changed_fields=changed,
+                    changed_fields=_changed_fields(reference_snapshot, snapshot),
                     message=(
                         "endpoint output changed when the available startup history changed"
                     ),
@@ -313,9 +314,9 @@ def audit_startup_history_sensitivity(
 def temporal_leakage_gate_result(report: TemporalLeakageReport) -> GateResult:
     """Adapt a prefix-invariance report to the frozen ``lookahead`` Hard Gate.
 
-    The gate is fail-closed: only a complete PASS for the requested cutoffs may
-    proceed.  Both detected leakage and an indeterminate audit fail the gate,
-    with different reasons preserved for governance and debugging.
+    Only a complete prefix-invariance PASS may proceed.  Detected leakage and
+    indeterminate evidence both fail closed, while preserving distinct reasons
+    for auditability and debugging.
     """
 
     if not isinstance(report, TemporalLeakageReport):
@@ -406,7 +407,7 @@ def _normalize_history_lengths(
     return tuple(sorted(normalized))
 
 
-def _run_evaluator(
+def _run_stable_evaluator(
     *,
     evaluator: TemporalEvaluator[T],
     history: Sequence[T],
@@ -414,10 +415,67 @@ def _run_evaluator(
     context: str,
     cutoff: int | None = None,
     history_length: int | None = None,
-) -> tuple[tuple[NormalizedSnapshot, ...] | None, TemporalAuditFinding | None]:
+) -> tuple[NormalizedOutputs | None, TemporalAuditFinding | None]:
+    """Run identical input twice and reject nondeterministic audit evidence."""
+
+    first, finding = _run_evaluator_once(
+        evaluator=evaluator,
+        history=history,
+        expected_length=expected_length,
+        context=f"{context} replay 1",
+        cutoff=cutoff,
+        history_length=history_length,
+    )
+    if finding is not None:
+        return None, finding
+    assert first is not None
+
+    second, finding = _run_evaluator_once(
+        evaluator=evaluator,
+        history=history,
+        expected_length=expected_length,
+        context=f"{context} replay 2",
+        cutoff=cutoff,
+        history_length=history_length,
+    )
+    if finding is not None:
+        return None, finding
+    assert second is not None
+
+    if first != second:
+        first_changed_index = next(
+            index
+            for index, (left, right) in enumerate(zip(first, second))
+            if left != right
+        )
+        return None, TemporalAuditFinding(
+            code=TemporalAuditFindingCode.NONDETERMINISTIC_EVALUATOR,
+            cutoff=cutoff,
+            history_length=history_length,
+            changed_fields=_changed_fields(
+                first[first_changed_index], second[first_changed_index]
+            ),
+            message=(
+                f"{context} produced different output for identical input "
+                f"at output row {first_changed_index}"
+            ),
+        )
+
+    return first, None
+
+
+def _run_evaluator_once(
+    *,
+    evaluator: TemporalEvaluator[T],
+    history: Sequence[T],
+    expected_length: int,
+    context: str,
+    cutoff: int | None = None,
+    history_length: int | None = None,
+) -> tuple[NormalizedOutputs | None, TemporalAuditFinding | None]:
     try:
         raw_outputs = tuple(evaluator(history))
-    except Exception as exc:  # audit a black-box implementation; do not false-pass.
+    except Exception as exc:  # black-box audit: runtime failure must not false-pass.
         return None, TemporalAuditFinding(
             code=TemporalAuditFindingCode.EVALUATOR_ERROR,
             cutoff=cutoff,
@@ -451,6 +509,7 @@ def _run_evaluator(
 def _normalize_snapshot(snapshot: Snapshot) -> NormalizedSnapshot:
     if not isinstance(snapshot, Mapping):
         raise ValueError("each evaluator output must be a mapping")
+
     normalized: list[tuple[str, Scalar]] = []
     for key, value in snapshot.items():
         if not isinstance(key, str) or not key:
