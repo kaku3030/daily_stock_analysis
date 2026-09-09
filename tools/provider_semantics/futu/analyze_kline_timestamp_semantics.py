@@ -13,7 +13,9 @@ The analyzer keeps competing hypotheses explicit:
   names the upcoming interval end.
 
 For K_60M it also reports whether observed keys fit a 09:30-anchored sequence
-or a clock-hour sequence.  These are observations, not provider contracts.
+or a clock-hour sequence.  Sequence gaps, first/last keys and historical
+session truncation are reported mechanically so half-day evidence can be
+reviewed without inventing a provider rule.
 """
 
 from __future__ import annotations
@@ -58,6 +60,45 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
 
 def _material_signature(payload: dict[str, Any]) -> tuple[Any, ...]:
     return tuple(payload.get(field) for field in MATERIAL_FIELDS)
+
+
+def _summary(values: list[float]) -> dict[str, Any] | None:
+    if not values:
+        return None
+    return {
+        "n": len(values),
+        "min": min(values),
+        "max": max(values),
+        "median": statistics.median(values),
+        "mean": statistics.mean(values),
+    }
+
+
+def _sequence_observations(stream: str, keys: list[datetime]) -> dict[str, Any]:
+    ordered = sorted(set(keys))
+    expected = INTERVAL_MINUTES.get(stream)
+    gaps = [
+        (right - left).total_seconds()
+        for left, right in zip(ordered, ordered[1:])
+    ]
+    expected_seconds = expected * 60 if expected is not None else None
+    return {
+        "first_time_key": ordered[0].isoformat() if ordered else None,
+        "last_time_key": ordered[-1].isoformat() if ordered else None,
+        "distinct_time_key_count": len(ordered),
+        "observed_span_seconds": (
+            (ordered[-1] - ordered[0]).total_seconds() if len(ordered) >= 2 else 0.0 if ordered else None
+        ),
+        "consecutive_key_gap_seconds": gaps,
+        "expected_nominal_interval_seconds": expected_seconds,
+        "all_consecutive_gaps_equal_nominal_interval": (
+            all(gap == expected_seconds for gap in gaps) if gaps and expected_seconds is not None else None
+        ),
+        "non_nominal_gap_seconds": (
+            [gap for gap in gaps if gap != expected_seconds] if expected_seconds is not None else gaps
+        ),
+        "adjudication": "MECHANICAL_OBSERVATION_ONLY",
+    }
 
 
 def analyze_live_events(events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -119,6 +160,7 @@ def analyze_live_events(events: list[dict[str, Any]]) -> dict[str, Any]:
                 first_minus_end_candidate_start_seconds
             ),
             "alignment_candidates": _alignment_candidates(stream, keys),
+            "sequence_observations": _sequence_observations(stream, keys),
             "adjudication": "MECHANICAL_OBSERVATION_ONLY",
         }
     return result
@@ -142,8 +184,8 @@ def _alignment_candidates(stream: str, keys: list[datetime]) -> dict[str, Any]:
             "note": "K15 minute residue cannot distinguish 09:30 anchor from clock-quarter grid",
         }
 
-    # K60 is discriminating: 09:30 anchor -> every key minute == 30;
-    # clock-hour anchor -> every key minute == 00.
+    # K60 minute residue is discriminating between these two candidate grids,
+    # but it remains an observation rather than a provider contract.
     return {
         "rth_0930_anchor_minute_30_matches_all": all(dt.minute == 30 for dt in keys),
         "clock_hour_anchor_minute_00_matches_all": all(dt.minute == 0 for dt in keys),
@@ -151,16 +193,14 @@ def _alignment_candidates(stream: str, keys: list[datetime]) -> dict[str, Any]:
     }
 
 
-def _summary(values: list[float]) -> dict[str, Any] | None:
-    if not values:
-        return None
-    return {
-        "n": len(values),
-        "min": min(values),
-        "max": max(values),
-        "median": statistics.median(values),
-        "mean": statistics.mean(values),
-    }
+def _sample_time_keys(rows: Any) -> list[str]:
+    if not isinstance(rows, list):
+        return []
+    keys = []
+    for row in rows:
+        if isinstance(row, dict) and row.get("time_key"):
+            keys.append(str(row["time_key"]))
+    return keys
 
 
 def analyze_snapshot_document(document: dict[str, Any]) -> dict[str, Any]:
@@ -177,11 +217,16 @@ def analyze_snapshot_document(document: dict[str, Any]) -> dict[str, Any]:
     output: dict[str, Any] = {}
     for (operation, ktype), samples in sorted(grouped.items()):
         latest_rows = []
+        sample_time_keys: list[list[str]] = []
+        sample_sequence_observations: list[dict[str, Any]] = []
         for sample in samples:
             rows = sample.get("raw_rows") or []
+            keys = _sample_time_keys(rows)
+            sample_time_keys.append(keys)
+            parsed_keys = [_parse_time_key_et(key) for key in keys]
+            sample_sequence_observations.append(_sequence_observations(ktype, parsed_keys))
+
             if isinstance(rows, list) and rows:
-                # request_history_kline may return a tuple-adapted shape only
-                # if SDK signature changes; keep this conservative.
                 row_candidates = [row for row in rows if isinstance(row, dict)]
                 if row_candidates:
                     latest_rows.append(row_candidates[-1])
@@ -195,6 +240,8 @@ def analyze_snapshot_document(document: dict[str, Any]) -> dict[str, Any]:
         output[f"{operation}:{ktype}"] = {
             "successful_sample_count": len(samples),
             "latest_rows": latest_rows,
+            "sample_time_keys": sample_time_keys,
+            "sample_sequence_observations": sample_sequence_observations,
             "same_time_key_material_mutation": {
                 key: len(set(signatures)) > 1
                 for key, signatures in sorted(by_key.items())
