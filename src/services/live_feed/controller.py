@@ -65,6 +65,7 @@ from typing import Callable
 from data_provider.live_feed_types import (
     BindingStrength,
     ControlPlaneState,
+    DeliveryMode,
     FailureClass,
     LifecycleState,
     ProviderEvent,
@@ -73,8 +74,14 @@ from data_provider.live_feed_types import (
     freeze_normalized_payload,
 )
 
-from .commands import ProviderCommand, ProviderCommandExecutor, ProviderCommandResult, ProviderCommandType
-from .health import LiveFeedHealth
+from .commands import (
+    ProviderCommand,
+    ProviderCommandExecutor,
+    ProviderCommandResult,
+    ProviderCommandType,
+    is_command_result_stale,
+)
+from .health import LiveFeedHealth, StreamFeedHealth, SymbolFeedHealth
 from .identity import ControllerGeneration, new_command_id
 from .registry import DesiredRegistrySnapshot, DesiredSubscriptionRegistry
 
@@ -144,6 +151,7 @@ class _ControlRequestKind(str, Enum):
     READD_INCARNATION = "READD_INCARNATION"
     SET_CONTROL_PLANE_STATE = "SET_CONTROL_PLANE_STATE"
     STOP = "STOP"
+    CONNECT_REQUESTED = "CONNECT_REQUESTED"  # Slice 2
 
 
 @dataclass(frozen=True)
@@ -228,6 +236,20 @@ class LiveFeedController:
         self._findings: list[str] = []
         self._command_results: list[ProviderCommandResult] = []
         self._latest_snapshot: LiveFeedControllerSnapshot | None = None
+        # Slice 2: minimal per-stream transport/subscription facts, written
+        # only by the writer from non-stale DATA/SUBSCRIPTION_RESULT
+        # events -- NOT a data-plane recovery/progress model, just the
+        # facts LiveFeedHealth already had a typed home for in Slice 1.
+        self._stream_health: dict[SemanticStreamKey, StreamFeedHealth] = {}
+        # Repair R1 (REPAIR 6): identifies which explicit CONNECT attempt
+        # currently has authority to affect lifecycle. Cleared on STOP, on
+        # a fresh CONNECTED, and on a transport-loss transition; set to the
+        # newly-issued command's id on every CONNECT_REQUESTED application.
+        # A late result whose command_id doesn't match this is stale,
+        # regardless of whether controller_generation still matches (two
+        # explicit attempts commonly share the same generation, since
+        # generation is not supposed to advance per attempt).
+        self._active_connect_command_id: str | None = None
 
         self._registry = DesiredSubscriptionRegistry()
 
@@ -344,6 +366,24 @@ class LiveFeedController:
 
         return self._submit_control_request(_ControlRequestKind.STOP)
 
+    def request_connect(self) -> EnqueueResult:
+        """Slice 2: enqueues a request that the writer attempt a fresh
+        transport connect. Does NOT itself call the provider -- the
+        writer, applying this in seq order, transitions lifecycle to
+        CONNECTING (only from DISCONNECTED/RECONNECTING, never if
+        stop_requested) and issues a CONNECT `ProviderCommand` onto the
+        local command queue for a worker to execute. Slice 2 does not
+        implement any automatic retry/backoff policy -- if a connect
+        attempt fails or the resulting connection is later lost, a new
+        `request_connect()` call is required to try again. That absence
+        is deliberate (see module docstring / carried-forward minors),
+        not an oversight: inventing a retry policy here would risk
+        encoding the SDK's own private reconnect policy as controller
+        policy, which the frozen contract explicitly forbids.
+        """
+
+        return self._submit_control_request(_ControlRequestKind.CONNECT_REQUESTED)
+
     # ---- readers (any thread; never mutate) ----
 
     def desired_registry_snapshot(self) -> DesiredRegistrySnapshot:
@@ -391,7 +431,7 @@ class LiveFeedController:
                 self._data_queue.clear()
 
             self._materialize_ingress_loss_findings()
-            self._materialize_command_results()
+            newly_staged_results = self._materialize_command_results()
 
             combined: list[tuple[int, object]] = [
                 *((item.seq, item) for item in control_items),
@@ -413,6 +453,14 @@ class LiveFeedController:
                         self._apply_event_as_writer(item)
                 except _RECOVERABLE_ITEM_ERRORS as exc:
                     self._record_writer_apply_error(item, seq, exc)
+
+            # REPAIR 4: applied AFTER the control/event batch (which may
+            # itself contain a STOP for this very pass), not before it --
+            # this is what makes the same-pass "CONNECT failure result +
+            # STOP both pending" case resolve safely with a single
+            # `stop_requested` check inside this call, instead of needing
+            # a second staging lane or a redesigned scheduler.
+            self._apply_command_result_lifecycle_effects(newly_staged_results)
 
             self._publish_snapshot()
             applied_count = len(combined)
@@ -451,11 +499,14 @@ class LiveFeedController:
             for queue_name, count in losses.items():
                 self._findings.append(f"INGRESS_LOSS: queue={queue_name} rejected_count={count}")
 
-    def _materialize_command_results(self) -> None:
+    def _materialize_command_results(self) -> list[ProviderCommandResult]:
         """Results were already frozen at the staging boundary
         (`_stage_command_result`, FIX-R2-3) -- this only moves them from
         non-authoritative staging into authoritative `_command_results`,
-        it does no further freezing/normalization itself.
+        it does no further freezing/normalization itself. Returns the
+        newly-materialized results so the writer can additionally react
+        to specific outcomes (Slice 2: a failed CONNECT) without a second
+        pass over `_command_results`.
         """
 
         self._assert_writer_context()
@@ -463,39 +514,157 @@ class LiveFeedController:
             staged = list(self._pending_command_results)
             self._pending_command_results.clear()
         if not staged:
-            return
+            return []
         with self._authoritative_lock:
             self._command_results.extend(staged)
+        return staged
+
+    def _apply_command_result_lifecycle_effects(self, results: list[ProviderCommandResult]) -> None:
+        """Slice 2: a failed CONNECT command is transport-level evidence
+        the writer must react to (there is no ProviderEvent for "the
+        connect attempt itself failed" -- the adapter never got far enough
+        to emit one).
+
+        REPAIR 4: once `stop_requested` is authoritative, NO command result
+        may mutate lifecycle -- checked first, unconditionally, for every
+        result. Late results are still recorded in `_command_results`
+        history (via `_materialize_command_results`, already done before
+        this runs) but produce no further effect.
+
+        REPAIR 6/7: single staleness policy, applied in two layers rather
+        than two conflicting implementations:
+
+        1. `is_command_result_stale` (commands.py) -- the shared,
+           documented, unit-tested generation+revision policy. It is used
+           here for what it actually protects: `desired_registry_revision`
+           genuinely scopes SUBSCRIBE/UNSUBSCRIBE-type work (a subscribe
+           issued under revision 12 whose registry moved to 13 is stale by
+           definition). CONNECT is not registry-scoped the same way -- an
+           unrelated desired-stream add/remove while a connect attempt is
+           in flight must not itself invalidate that attempt's own
+           failure/success -- so only the generation half of the helper is
+           meaningful for CONNECT; passing the result's OWN revision back
+           in neutralizes that half deliberately (documented, not a bug).
+        2. `command_id` vs. `_active_connect_command_id` -- the dimension
+           `is_command_result_stale` cannot express at all: two distinct
+           explicit `request_connect()` attempts commonly share the same
+           generation (generation is not supposed to advance per attempt),
+           so generation alone cannot tell attempt A's late result apart
+           from attempt B's current one. `command_id` can.
+        """
+
+        self._assert_writer_context()
+        if not results:
+            return
+        with self._authoritative_lock:
+            stopped = self._stop_requested
+        if stopped:
+            return
+        with self._authoritative_lock:
+            current_generation = self._controller_generation.value
+            active_connect_command_id = self._active_connect_command_id
+        for result in results:
+            if result.command_type is not ProviderCommandType.CONNECT or result.succeeded:
+                continue
+            if is_command_result_stale(
+                result,
+                current_controller_generation=current_generation,
+                current_desired_registry_revision=result.desired_registry_revision,  # revision not meaningful for CONNECT -- see docstring
+            ):
+                self._record_diagnostic_finding(
+                    f"STALE_COMMAND_RESULT: CONNECT failure for generation={result.controller_generation} "
+                    f"ignored, current generation={current_generation}"
+                )
+                continue
+            if result.command_id != active_connect_command_id:
+                self._record_diagnostic_finding(
+                    f"STALE_COMMAND_RESULT: CONNECT failure for command_id={result.command_id} ignored, "
+                    f"active attempt={active_connect_command_id!r}"
+                )
+                continue
+            with self._authoritative_lock:
+                if self._lifecycle_state is LifecycleState.CONNECTING:
+                    self._lifecycle_state = LifecycleState.RECONNECTING
+                    self._findings.append(f"CONNECT_FAILED: {result.error}")
+                    self._active_connect_command_id = None
 
     def _apply_control_request_as_writer(self, request: _ControlRequest) -> None:
         self._assert_writer_context()
         if request.kind is _ControlRequestKind.STOP:
             with self._authoritative_lock:
                 self._stop_requested = True
+                self._active_connect_command_id = None
+            # REPAIR 5: STOP must actually retire the provider transport,
+            # not just block further lifecycle mutation. CLOSE always goes
+            # through the same nonblocking command queue a worker later
+            # drains -- never called inline here. Idempotent on the
+            # adapter side (a no-op if no context exists), and if the
+            # queue itself is full, `_enqueue_command_as_writer` already
+            # raises an explicit COMMAND_QUEUE_FULL finding rather than
+            # silently pretending shutdown completed.
+            self._enqueue_command_as_writer(ProviderCommandType.CLOSE)
             return
         if request.kind is _ControlRequestKind.ADD_DESIRED:
             self._registry.add_desired(request.semantic_stream_key)
         elif request.kind is _ControlRequestKind.REMOVE_DESIRED:
             self._registry.remove_desired(request.semantic_stream_key)
+            with self._authoritative_lock:
+                transport_active = self._lifecycle_state in (LifecycleState.CONNECTED, LifecycleState.SUBSCRIBING)
+            if transport_active:
+                epoch = self._registry.epoch_for_key(request.semantic_stream_key)
+                self._enqueue_command_as_writer(
+                    ProviderCommandType.UNSUBSCRIBE,
+                    semantic_stream_key=request.semantic_stream_key,
+                    stream_subscription_epoch=epoch,
+                )
         elif request.kind is _ControlRequestKind.READD_INCARNATION:
             self._registry.readd_new_incarnation(request.semantic_stream_key)
         elif request.kind is _ControlRequestKind.SET_CONTROL_PLANE_STATE:
             self._registry.set_control_plane_state(
                 request.semantic_stream_key, request.control_plane_state, binding_strength=request.binding_strength
             )
+        elif request.kind is _ControlRequestKind.CONNECT_REQUESTED:
+            with self._authoritative_lock:
+                stop_requested = self._stop_requested
+                current_state = self._lifecycle_state
+            if stop_requested:
+                self._record_diagnostic_finding("CONNECT_REQUESTED_IGNORED: stop_requested is set")
+                return
+            if current_state not in (LifecycleState.DISCONNECTED, LifecycleState.RECONNECTING):
+                self._record_diagnostic_finding(
+                    f"CONNECT_REQUESTED_IGNORED: lifecycle_state={current_state.value} is not eligible to connect"
+                )
+                return
+            with self._authoritative_lock:
+                self._lifecycle_state = LifecycleState.CONNECTING
+            command = self._enqueue_command_as_writer(ProviderCommandType.CONNECT)
+            with self._authoritative_lock:
+                # REPAIR 6: this explicit attempt is now the only one with
+                # authority to affect lifecycle; a prior attempt's late
+                # result (if any) is no longer active regardless of
+                # whether it shares this attempt's generation.
+                self._active_connect_command_id = command.command_id if command is not None else None
 
     def _apply_event_as_writer(self, event: ProviderEvent) -> None:
-        """Slice 1's only lifecycle logic (F5): once stop has been
-        applied, no event may advance lifecycle into an active/recovery
-        state -- a DISCONNECTED still resolves cleanly to DISCONNECTED,
-        but everything else (a stale CONNECTED, an ERROR, a
-        reconnect-oriented event) is recorded as a diagnostic finding only
-        and produces no lifecycle mutation.
+        """Slice 1's stop guard (F5) still applies first, unconditionally:
+        once stop has been applied, no event may advance lifecycle into an
+        active/recovery state -- a DISCONNECTED still resolves cleanly to
+        DISCONNECTED, everything else is a diagnostic finding only.
+
+        Below that, Slice 2 dispatches by event kind. Every kind that
+        carries a `semantic_stream_key` (SUBSCRIPTION_RESULT, DATA) is
+        checked via `_event_staleness_reason` first -- generation
+        mismatch, the key no longer being desired, or an epoch mismatch
+        all mean "stale", recorded as a finding, never applied. CONNECTED/
+        DISCONNECTED are checked for generation staleness only (they have
+        no stream key).
         """
 
         self._assert_writer_context()
         with self._authoritative_lock:
-            if self._stop_requested:
+            stopped = self._stop_requested
+        if stopped:
+            with self._authoritative_lock:
                 if event.event_kind is ProviderEventKind.DISCONNECTED:
                     self._lifecycle_state = LifecycleState.DISCONNECTED
                     self._findings.append(
@@ -505,19 +674,216 @@ class LiveFeedController:
                     self._findings.append(
                         f"STALE_EVENT_AFTER_STOP: {event.event_kind.value} ignored, no lifecycle change"
                     )
-                return
+            return
 
-            if event.event_kind is ProviderEventKind.CONNECTED:
-                if self._lifecycle_state in (
-                    LifecycleState.DISCONNECTED,
-                    LifecycleState.RECONNECTING,
-                    LifecycleState.CONNECTING,
-                ):
-                    self._lifecycle_state = LifecycleState.CONNECTED
-            elif event.event_kind is ProviderEventKind.DISCONNECTED:
-                self._lifecycle_state = LifecycleState.RECONNECTING
-            elif event.event_kind is ProviderEventKind.ERROR:
+        if event.event_kind is ProviderEventKind.CONNECTED:
+            self._handle_connected_event(event)
+        elif event.event_kind is ProviderEventKind.DISCONNECTED:
+            self._handle_disconnected_event(event)
+        elif event.event_kind is ProviderEventKind.TRANSPORT_RECONNECTING:
+            # SDK-private auto-reconnect/auto-resubscribe evidence only --
+            # frozen contract §13: must never be treated as controller
+            # recovery completion. No lifecycle mutation, ever.
+            self._record_diagnostic_finding(
+                "PROVIDER_TRANSPORT_RECONNECT_OBSERVED: SDK auto-reconnect/resubscribe evidence only, "
+                "controller recovery unaffected"
+            )
+        elif event.event_kind is ProviderEventKind.SUBSCRIPTION_RESULT:
+            self._handle_subscription_result_event(event)
+        elif event.event_kind is ProviderEventKind.DATA:
+            self._handle_data_event(event)
+        elif event.event_kind is ProviderEventKind.ERROR:
+            with self._authoritative_lock:
                 self._failure_class = FailureClass.UNKNOWN
+
+    def _event_staleness_reason(self, event: ProviderEvent) -> str | None:
+        """None if `event` is fresh; otherwise a short machine-readable
+        reason. Checks generation first (cheap, applies to every event),
+        then -- only if the event names a stream -- whether that stream is
+        still desired and whether its epoch still matches.
+        """
+
+        with self._authoritative_lock:
+            current_generation = self._controller_generation.value
+        if event.controller_generation != current_generation:
+            return f"stale_generation(event={event.controller_generation},current={current_generation})"
+        if event.semantic_stream_key is not None:
+            entry = self._registry.current_entry(event.semantic_stream_key)
+            if entry is None:
+                return "stream_not_currently_desired"
+            if event.stream_subscription_epoch is not None and event.stream_subscription_epoch != entry.stream_subscription_epoch:
+                return f"stale_epoch(event={event.stream_subscription_epoch},current={entry.stream_subscription_epoch})"
+        return None
+
+    def _handle_connected_event(self, event: ProviderEvent) -> None:
+        reason = self._event_staleness_reason(event)
+        if reason:
+            self._record_diagnostic_finding(f"STALE_CONNECTED_EVENT: {reason}")
+            return
+        with self._authoritative_lock:
+            eligible = self._lifecycle_state in (
+                LifecycleState.DISCONNECTED,
+                LifecycleState.RECONNECTING,
+                LifecycleState.CONNECTING,
+            )
+        if not eligible:
+            with self._authoritative_lock:
+                current = self._lifecycle_state
+            self._record_diagnostic_finding(f"CONNECTED_EVENT_IGNORED: lifecycle_state={current.value} not eligible")
+            return
+
+        with self._authoritative_lock:
+            self._lifecycle_state = LifecycleState.CONNECTED
+            # This CONNECT attempt is resolved (successfully); it no
+            # longer needs tracking for staleness purposes.
+            self._active_connect_command_id = None
+
+        # A new (non-stale) CONNECTED means a fresh transport for the
+        # current generation -- old ACK/binding must not silently survive
+        # it (frozen contract: connection generation != subscription
+        # incarnation binding). Reset every currently-desired entry back
+        # to REQUESTED/UNVERIFIED before re-issuing SUBSCRIBE commands.
+        for entry in self._registry.snapshot().entries:
+            try:
+                self._registry.set_control_plane_state(
+                    entry.semantic_stream_key, ControlPlaneState.REQUESTED, binding_strength=BindingStrength.UNVERIFIED
+                )
+            except KeyError:
+                continue  # removed concurrently between snapshot and this call -- nothing to reset
+
+        with self._authoritative_lock:
+            self._lifecycle_state = LifecycleState.SUBSCRIBING
+        for entry in self._registry.snapshot().entries:
+            self._enqueue_command_as_writer(
+                ProviderCommandType.SUBSCRIBE,
+                semantic_stream_key=entry.semantic_stream_key,
+                stream_subscription_epoch=entry.stream_subscription_epoch,
+            )
+
+    def _handle_disconnected_event(self, event: ProviderEvent) -> None:
+        with self._authoritative_lock:
+            current_generation = self._controller_generation.value
+        if event.controller_generation != current_generation:
+            self._record_diagnostic_finding(
+                f"STALE_DISCONNECTED_EVENT: event_generation={event.controller_generation} current={current_generation}"
+            )
+            return
+        with self._authoritative_lock:
+            already_reconnecting = self._lifecycle_state is LifecycleState.RECONNECTING
+            if not already_reconnecting:
+                # "first authoritative transport loss observed -> allocate/
+                # advance controller recovery generation" (Futu
+                # implementation spec §A5/§B1) -- NOT one advance per
+                # SDK-private retry attempt; repeated DISCONNECTED evidence
+                # while already RECONNECTING does not advance again.
+                self._controller_generation = self._controller_generation.advance()
+            self._lifecycle_state = LifecycleState.RECONNECTING
+            # Any explicit connect attempt that was pending is now moot --
+            # a transport loss superseded it.
+            self._active_connect_command_id = None
+
+    def _handle_subscription_result_event(self, event: ProviderEvent) -> None:
+        if event.semantic_stream_key is None:
+            self._record_diagnostic_finding("MALFORMED_SUBSCRIPTION_RESULT: missing semantic_stream_key, ignored")
+            return
+        reason = self._event_staleness_reason(event)
+        if reason:
+            self._record_diagnostic_finding(f"STALE_SUBSCRIPTION_RESULT: {reason} key={event.semantic_stream_key!r}")
+            return
+        succeeded = bool(event.diagnostic_fields.get("succeeded")) if event.diagnostic_fields else False
+        state = ControlPlaneState.ACKED if succeeded else ControlPlaneState.REJECTED
+        self._registry.set_control_plane_state(event.semantic_stream_key, state)
+
+    def _handle_data_event(self, event: ProviderEvent) -> None:
+        """REPAIR 1 (controller side): a DATA event's `stream_subscription_epoch`
+        is `None` by construction from the Futu adapter (it has no
+        authoritative per-callback incarnation proof to offer -- see
+        `futu_streaming_adapter.py` module docstring) -- so
+        `_event_staleness_reason` cannot and does not verify DATA against
+        a specific subscription incarnation, only against "is this key
+        currently desired at all" and "is the generation fresh". That is
+        deliberately weaker than proof of incarnation. Every resulting
+        `StreamFeedHealth` fact is therefore recorded with
+        `binding_strength=UNVERIFIED` UNCONDITIONALLY -- never inherited
+        from the registry entry's own (control-plane) binding_strength --
+        so nothing downstream can infer "this health entry exists,
+        therefore the callback that produced it was proven to belong to
+        the current subscription incarnation". That inference would be
+        false; Futu provides no evidence for it.
+        """
+
+        if event.semantic_stream_key is None:
+            self._record_diagnostic_finding("MALFORMED_DATA_EVENT: missing semantic_stream_key, ignored")
+            return
+        reason = self._event_staleness_reason(event)
+        if reason:
+            self._record_diagnostic_finding(f"STALE_DATA_EVENT: {reason} key={event.semantic_stream_key!r}")
+            return
+        key = event.semantic_stream_key
+        entry = self._registry.current_entry(key)
+        previous = self._stream_health.get(key)
+        self._stream_health[key] = StreamFeedHealth(
+            semantic_stream_key=key,
+            control_plane_state=entry.control_plane_state if entry is not None else ControlPlaneState.DESIRED,
+            delivery_mode=event.delivery_mode,
+            binding_strength=BindingStrength.UNVERIFIED,
+            last_event_at_utc=event.observed_at_utc,
+            last_progress_at_utc=(
+                event.observed_at_utc
+                if event.progress_identity_candidate is not None
+                else (previous.last_progress_at_utc if previous is not None else None)
+            ),
+        )
+
+    def _record_diagnostic_finding(self, message: str) -> None:
+        self._assert_writer_context()
+        with self._authoritative_lock:
+            self._findings.append(message)
+
+    def _enqueue_command_as_writer(
+        self,
+        command_type: ProviderCommandType,
+        *,
+        semantic_stream_key: SemanticStreamKey | None = None,
+        stream_subscription_epoch: int | None = None,
+    ) -> ProviderCommand | None:
+        """Writer-side counterpart to `submit_command`: the writer itself
+        decides a command is needed (e.g. "resubscribe this desired
+        stream after a fresh CONNECTED") and places it on the same local,
+        bounded, nonblocking command queue -- it never calls
+        `self._executor` directly. Deciding *what* to enqueue is writer
+        policy; actually running it stays entirely off the writer thread.
+        Returns the enqueued `ProviderCommand`, or None if the queue was
+        full (already recorded as an explicit finding below).
+        """
+
+        self._assert_writer_context()
+        with self._authoritative_lock:
+            generation = self._controller_generation.value
+        revision = self._registry.snapshot().revision
+        command = ProviderCommand(
+            runtime_instance_id=self._runtime_instance_id,
+            provider_id=self._provider_id,
+            controller_generation=generation,
+            desired_registry_revision=revision,
+            command_id=new_command_id(),
+            command_type=command_type,
+            created_at=self._now_utc(),
+            stream_subscription_epoch=stream_subscription_epoch,
+            semantic_stream_key=semantic_stream_key,
+        )
+        with self._command_queue_lock:
+            if len(self._command_queue) >= self._command_queue_maxsize:
+                full = True
+            else:
+                self._command_queue.append(command)
+                full = False
+        if full:
+            self._record_diagnostic_finding(
+                f"COMMAND_QUEUE_FULL: dropped {command_type.value} for {semantic_stream_key!r}"
+            )
+            return None
+        return command
 
     def _transition_lifecycle_state(self, new_state: LifecycleState) -> None:
         """Guarded transition primitive. No caller in this module ever
@@ -606,6 +972,19 @@ class LiveFeedController:
 
     # ---- snapshot publication (F8: one atomic publication point) ----
 
+    def _build_symbol_health_locked(self) -> tuple[SymbolFeedHealth, ...]:
+        """Groups the writer-owned `_stream_health` facts by symbol.
+        Caller must already be in writer context; reads a plain dict the
+        writer exclusively owns, so no extra lock is needed here.
+        """
+
+        by_symbol: dict[str, list[StreamFeedHealth]] = {}
+        for key, stream_health in self._stream_health.items():
+            by_symbol.setdefault(key.symbol, []).append(stream_health)
+        return tuple(
+            SymbolFeedHealth(symbol=symbol, streams=tuple(streams)) for symbol, streams in sorted(by_symbol.items())
+        )
+
     def _publish_snapshot(self) -> None:
         self._assert_writer_context()
         with self._authoritative_lock:
@@ -615,7 +994,10 @@ class LiveFeedController:
             stop_requested = self._stop_requested
             findings = tuple(self._findings)
             registry_snapshot = self._registry.snapshot()
-            health = LiveFeedHealth(lifecycle_state=lifecycle_state, failure_class=failure_class, findings=findings)
+            symbols = self._build_symbol_health_locked()
+            health = LiveFeedHealth(
+                lifecycle_state=lifecycle_state, failure_class=failure_class, symbols=symbols, findings=findings
+            )
             self._latest_snapshot = LiveFeedControllerSnapshot(
                 runtime_instance_id=self._runtime_instance_id,
                 provider_id=self._provider_id,
@@ -646,3 +1028,46 @@ def run_command_worker_once(controller: LiveFeedController, executor: ProviderCo
     for command in commands:
         executor.submit(command)
     return len(commands)
+
+
+def start_command_worker_thread(
+    controller: LiveFeedController,
+    executor: ProviderCommandExecutor,
+    *,
+    poll_interval_seconds: float = 0.05,
+) -> "_CommandWorkerHandle":
+    """Minimal production-usable persistent worker: a single daemon
+    thread that repeatedly calls `run_command_worker_once`. This is the
+    ONLY sanctioned way to actually run `executor.submit()` outside of
+    tests -- it never touches `process_pending` or the writer context.
+
+    This is intentionally simple (poll a queue, submit, sleep) and makes
+    no claim about isolating a permanently-stuck Futu call: if
+    `executor.submit()` never returns, this thread stops making progress
+    on further commands, but the writer is never affected. Whether a
+    stronger isolation mechanism (e.g. a subprocess-based executor) is
+    required is the open question this module's docstring already flags
+    as unresolved for a later slice.
+    """
+
+    stop_event = threading.Event()
+
+    def _loop() -> None:
+        while not stop_event.is_set():
+            n = run_command_worker_once(controller, executor)
+            if n == 0:
+                stop_event.wait(poll_interval_seconds)
+
+    thread = threading.Thread(target=_loop, name="live-feed-command-worker", daemon=True)
+    thread.start()
+    return _CommandWorkerHandle(thread=thread, stop_event=stop_event)
+
+
+@dataclass(frozen=True)
+class _CommandWorkerHandle:
+    thread: threading.Thread
+    stop_event: threading.Event
+
+    def stop(self, *, join_timeout: float = 2.0) -> None:
+        self.stop_event.set()
+        self.thread.join(timeout=join_timeout)

@@ -131,6 +131,26 @@ class DesiredSubscriptionRegistry:
         with self._lock:
             return self._snapshot_locked()
 
+    def current_entry(self, key: SemanticStreamKey) -> DesiredRegistryEntry | None:
+        """Slice 2 addition: read-only lookup of a single entry, used by
+        the writer to validate a provider event's `semantic_stream_key`
+        (and its epoch) against current desired truth before treating the
+        event as non-stale. Returns None if `key` is not currently
+        desired (e.g. it was removed) -- distinct from `epoch_for_key`,
+        which remembers epoch history even after removal.
+        """
+
+        with self._lock:
+            return self._entries.get(key)
+
+    def epoch_for_key(self, key: SemanticStreamKey) -> int | None:
+        """Slice 2 addition: last-known subscription epoch for `key`,
+        remembered even after removal (diagnostic/comparison aid only).
+        """
+
+        with self._lock:
+            return self._last_epoch_by_key.get(key)
+
     def _snapshot_locked(self) -> DesiredRegistrySnapshot:
         entries = tuple(sorted(self._entries.values(), key=_sort_key))
         return DesiredRegistrySnapshot(revision=self._revision, entries=entries)

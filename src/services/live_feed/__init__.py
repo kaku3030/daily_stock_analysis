@@ -23,7 +23,9 @@ from .controller import (
     LivePromotionForbidden,
     WriterConcurrencyViolation,
     run_command_worker_once,
+    start_command_worker_thread,
 )
+from .futu_executor import FutuProviderCommandExecutor
 from .health import LiveFeedHealth, StreamFeedHealth, SymbolFeedHealth
 from .identity import ControllerGeneration, new_command_id, new_runtime_instance_id
 from .registry import DesiredRegistryEntry, DesiredRegistrySnapshot, DesiredSubscriptionRegistry
@@ -36,6 +38,7 @@ __all__ = [
     "DesiredSubscriptionRegistry",
     "EnqueueResult",
     "FakeProviderCommandExecutor",
+    "FutuProviderCommandExecutor",
     "LiveFeedController",
     "LiveFeedControllerSnapshot",
     "LiveFeedHealth",
@@ -51,4 +54,5 @@ __all__ = [
     "new_command_id",
     "new_runtime_instance_id",
     "run_command_worker_once",
+    "start_command_worker_thread",
 ]

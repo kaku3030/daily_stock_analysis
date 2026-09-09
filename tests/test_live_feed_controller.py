@@ -180,8 +180,9 @@ def test_f2_concurrent_ordering_is_deterministic_under_writer_serialization() ->
     controller.process_pending()
     snap = controller.snapshot()
     # whichever order they actually landed in, the outcome is one of exactly
-    # two deterministic possibilities -- never a torn/ambiguous third state
-    if snap.stop_requested and snap.lifecycle_state is LifecycleState.CONNECTED:
+    # two deterministic possibilities -- never a torn/ambiguous third state.
+    # Slice 2: a CONNECTED that precedes STOP now cascades to SUBSCRIBING.
+    if snap.stop_requested and snap.lifecycle_state is LifecycleState.SUBSCRIBING:
         assert True  # CONNECTED's seq happened to precede STOP's seq
     else:
         assert snap.stop_requested is True
@@ -386,7 +387,11 @@ def test_f5_connected_queued_before_stop_in_same_batch_still_applies_then_stops(
     controller.request_stop()  # later seq
     controller.process_pending()
     snap = controller.snapshot()
-    assert snap.lifecycle_state is LifecycleState.CONNECTED  # genuinely arrived first
+    # Slice 2: a fresh non-stale CONNECTED cascades straight through to
+    # SUBSCRIBING in the same writer pass (no desired streams here, so
+    # nothing is actually issued) -- still demonstrates it "genuinely
+    # arrived first" (it was applied at all) before STOP took effect.
+    assert snap.lifecycle_state is LifecycleState.SUBSCRIBING
     assert snap.stop_requested is True
 
 
@@ -509,7 +514,8 @@ def test_f8_snapshot_changes_only_after_writer_applied_mutation() -> None:
     controller.process_pending()
     after = controller.snapshot()
     assert after is not before
-    assert after.lifecycle_state is LifecycleState.CONNECTED
+    # Slice 2: fresh CONNECTED cascades to SUBSCRIBING in the same pass
+    assert after.lifecycle_state is LifecycleState.SUBSCRIBING
 
 
 def test_f8_registry_revision_in_snapshot_matches_entries_from_same_writer_point() -> None:
@@ -530,8 +536,10 @@ def test_f8_stop_lifecycle_registry_are_coherent_within_one_snapshot() -> None:
     snap = controller.snapshot()
     # all facts reflect the SAME writer pass -- no partial/torn combination
     assert snap.stop_requested is True
-    assert snap.desired_registry_revision == 1
-    assert snap.lifecycle_state is LifecycleState.CONNECTED  # CONNECTED preceded STOP in seq order
+    # Slice 2: revision 1 = add_desired; revision 2 = CONNECTED resetting
+    # the entry's control-plane state to REQUESTED before resubscribing
+    assert snap.desired_registry_revision == 2
+    assert snap.lifecycle_state is LifecycleState.SUBSCRIBING  # CONNECTED preceded STOP in seq order, then cascaded
 
 
 def test_f8_reader_call_does_not_mutate_anything() -> None:
@@ -666,7 +674,8 @@ def test_fixr2_1_normal_writer_path_still_succeeds() -> None:
     controller.submit_event(_event(ProviderEventKind.CONNECTED))
     applied = controller.process_pending()
     assert applied == 1
-    assert controller.snapshot().lifecycle_state is LifecycleState.CONNECTED
+    # Slice 2: fresh CONNECTED cascades to SUBSCRIBING in the same pass
+    assert controller.snapshot().lifecycle_state is LifecycleState.SUBSCRIBING
 
 
 def test_fixr2_2_invalid_control_update_does_not_abort_batch() -> None:

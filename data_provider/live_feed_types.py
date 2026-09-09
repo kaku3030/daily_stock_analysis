@@ -113,6 +113,15 @@ class ProviderEvent:
     mappings (``types.MappingProxyType``); this type does not deep-copy or
     validate them, so a caller that hands over a mutable dict is
     responsible for not mutating it afterward.
+
+    `stream_subscription_epoch` (Slice 2 addition): a provider adapter may
+    stamp this from the epoch it last issued a SUBSCRIBE command under for
+    this `semantic_stream_key`, purely as a normalization aid -- it is not
+    authoritative. The controller alone decides whether it matches the
+    CURRENT desired-registry epoch before treating the event as non-stale
+    (frozen contract: "unsubscribe success is not a callback-drain
+    barrier" -- a late callback for a removed/re-incarnated stream must be
+    identifiable as stale).
     """
 
     runtime_instance_id: str
@@ -123,6 +132,7 @@ class ProviderEvent:
     event_kind: ProviderEventKind
     local_enqueue_seq: int | None = None
     semantic_stream_key: SemanticStreamKey | None = None
+    stream_subscription_epoch: int | None = None
     provider_context_id: str | None = None
     provider_connection_attempt_id: str | None = None
     payload: Mapping[str, Any] | None = None
