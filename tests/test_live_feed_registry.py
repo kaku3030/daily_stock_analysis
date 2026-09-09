@@ -86,3 +86,99 @@ def test_snapshot_is_immutable_and_not_affected_by_further_mutation() -> None:
     snap = registry.snapshot()
     registry.remove_desired(KEY)
     assert len(snap.entries) == 1  # the earlier snapshot is untouched
+
+
+def test_control_plane_observation_never_advances_desired_revision() -> None:
+    registry = DesiredSubscriptionRegistry()
+    registry.add_desired(KEY)
+    assert registry.snapshot().revision == 1
+
+    for state in (
+        ControlPlaneState.REQUESTED,
+        ControlPlaneState.ACKED,
+        ControlPlaneState.INCARNATION_UNVERIFIED,
+        ControlPlaneState.INCARNATION_BOUND,
+        ControlPlaneState.REJECTED,
+    ):
+        snap = registry.set_control_plane_state(KEY, state)
+        assert snap.revision == 1
+        assert snap.entries[0].control_plane_state is state
+
+
+def test_binding_observation_never_advances_desired_revision() -> None:
+    registry = DesiredSubscriptionRegistry()
+    registry.add_desired(KEY)
+
+    snap = registry.set_control_plane_state(
+        KEY,
+        ControlPlaneState.INCARNATION_BOUND,
+        binding_strength=BindingStrength.VERIFIED,
+    )
+
+    assert snap.revision == 1
+    assert snap.entries[0].binding_strength is BindingStrength.VERIFIED
+
+
+def test_unknown_control_plane_observation_does_not_mutate_revision() -> None:
+    import pytest
+
+    registry = DesiredSubscriptionRegistry()
+    registry.add_desired(KEY)
+    unknown_key = SemanticStreamKey(
+        provider_id="futu",
+        market="HK",
+        symbol="HK.09988",
+        stream_type="QUOTE",
+    )
+    before = registry.snapshot()
+
+    with pytest.raises(KeyError):
+        registry.set_control_plane_state(unknown_key, ControlPlaneState.ACKED)
+
+    after = registry.snapshot()
+    assert after.revision == before.revision == 1
+    assert after.entries == before.entries
+
+
+def test_multiple_keys_observations_do_not_mutate_global_desired_revision() -> None:
+    registry = DesiredSubscriptionRegistry()
+    other_key = SemanticStreamKey(
+        provider_id="futu",
+        market="HK",
+        symbol="HK.09988",
+        stream_type="QUOTE",
+    )
+    registry.add_desired(KEY)
+    registry.add_desired(other_key)
+    assert registry.snapshot().revision == 2
+
+    registry.set_control_plane_state(KEY, ControlPlaneState.REQUESTED)
+    registry.set_control_plane_state(other_key, ControlPlaneState.ACKED)
+    registry.set_control_plane_state(KEY, ControlPlaneState.INCARNATION_BOUND)
+
+    assert registry.snapshot().revision == 2
+
+
+def test_only_intent_mutations_advance_revision_while_observations_preserve_epoch() -> None:
+    import pytest
+
+    registry = DesiredSubscriptionRegistry()
+    added = registry.add_desired(KEY)
+    assert added.revision == 1
+    first_epoch = added.entries[0].stream_subscription_epoch
+
+    observed = registry.set_control_plane_state(KEY, ControlPlaneState.ACKED)
+    assert observed.revision == 1
+    assert observed.entries[0].stream_subscription_epoch == first_epoch
+
+    removed = registry.remove_desired(KEY)
+    assert removed.revision == 2
+
+    with pytest.raises(KeyError):
+        registry.set_control_plane_state(KEY, ControlPlaneState.REJECTED)
+    assert registry.snapshot().revision == 2
+
+    readded = registry.readd_new_incarnation(KEY)
+    assert readded.revision == 3
+    assert readded.entries[0].stream_subscription_epoch == first_epoch + 1
+    assert readded.entries[0].control_plane_state is ControlPlaneState.DESIRED
