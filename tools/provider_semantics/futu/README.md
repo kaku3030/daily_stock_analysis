@@ -1,128 +1,88 @@
-# Futu/Moomoo Provider Semantics Harness -- Wave 1
+# Futu/Moomoo Provider Semantics Harness
 
-Isolated, read-only empirical test harness for Futu/Moomoo provider
-semantics. **Not production code.** Nothing under `src/` or
-`data_provider/` imports anything from this directory, and this harness
-imports nothing from production adapters -- it talks to the `futu` SDK
-directly against a locally running OpenD gateway.
+Isolated, read-only empirical test harness for Futu/Moomoo provider semantics. **Not production code.** Nothing under `src/` or `data_provider/` imports anything from this directory, and these tools talk to the `futu` SDK directly against a locally running OpenD gateway.
 
-## Scope (Wave 1 only)
+## Existing evidence waves
 
-F01 (quote timestamp semantics), F02 (1m bar timestamp semantics), F03
-(timezone/UTC normalization of raw fields), F04 (realtime-vs-delayed
-entitlement exposure), F05 (entitlement scope), F06 (subscribe result/ACK
-semantics), F07 (ACK granularity), F09 (zero-trade minute behavior), F10
-(low-liquidity silence behavior), F28 (normal publication delay), F37
-(symbol normalization).
+Wave 1 covers temporal/basic-stream semantics such as QUOTE timestamp behavior, HK K_1M timestamp behavior, entitlement exposure, subscribe semantics, zero-trade behavior and publication delay. Wave 2 covers reconnect/catch-up/provider lifecycle semantics. The current evidence registry is:
 
-Wave 2 (reconnect/catch-up experiments) is explicitly out of scope here.
+`FUTU_SEMANTIC_CONTRACT_V0_1.md`
 
-## Safety
+Raw evidence and semantic adjudication remain separate. Mock/self-tests can validate recorder mechanics but are never provider-semantic evidence.
 
-Market-data only. Never places, cancels, or modifies an order; never
-changes account or trading state; never subscribes a paid package or
-changes permissions. Only quote/market-data SDK calls are used.
+## P0 K_15M / K_60M timestamp-semantics closure pack
 
-## Layout
+Radar currentness design requires direct US K_15M/K_60M evidence. Official Futu documentation does not define whether `time_key` is a bar-start or bar-end boundary and does not define the US K_60M bucket anchor. Therefore currentness timing remains blocked pending controlled observation.
 
-```
-tools/provider_semantics/futu/
-    README.md
-    models.py              # RawEvent shape + SemanticTestResult/TestStatus
-    recorder.py            # append-only JSONL recorder, run-dir management
-    wave1_runner.py         # CLI harness: connects, probes, subscribes, analyzes
-    harness_selftest.py     # pytest: recorder/model MECHANICS only (mocked callback)
-    runs/                  # one timestamped subdirectory per execution
-        2026-.../
-            metadata.json      # environment provenance (written once)
-            events.jsonl       # raw push events, append-only
-            sdk_calls.jsonl    # raw SDK call/response records, append-only
-            observations.json # post-hoc structured analysis (written once)
-            results.json       # SemanticTestResult per Wave-1 test id (written once)
-```
+Authoritative evidence report:
 
-Every run gets a fresh, uniquely-named directory. Raw evidence files
-(`events.jsonl`, `sdk_calls.jsonl`) are opened in append mode for the
-lifetime of one run and are never rewritten; `metadata.json`,
-`observations.json`, and `results.json` are written exactly once per run
-and raise `FileExistsError` on a second write attempt. Re-running the
-harness always creates a new run directory -- prior evidence is never
-overwritten.
+`FUTU_KLINE_TIMESTAMP_SEMANTICS_REPORT_2026_09_09.md`
 
-## Two-layer evidence model
+### 1. Long live callback capture
 
-1. **Raw evidence** (`events.jsonl`, `sdk_calls.jsonl`): unmodified provider
-   data plus local capture metadata (UTC wall-clock time, monotonic
-   receive time, thread id, local sequence number). No field is dropped
-   for looking irrelevant. No interpretation is applied here.
-2. **Semantic results** (`results.json`): one `SemanticTestResult` per
-   Wave-1 test id, referencing the raw evidence files by path -- never
-   inlining raw SDK objects. Status is restricted to `VERIFIED`,
-   `PARTIALLY_VERIFIED`, `UNRESOLVED`, `CONFLICTING`. The harness
-   deliberately biases toward `PARTIALLY_VERIFIED`/`UNRESOLVED` rather than
-   self-declaring `VERIFIED` from a single short run -- final semantic
-   adjudication is external to this tool.
+`kline_timestamp_probe.py`
 
-## Running
+- subscribes directly to US K_15M + K_60M;
+- explicit `Session.RTH`, `ETH`, or `ALL`;
+- records raw callbacks and local receive timing;
+- does **not** issue periodic synchronous K-line RPCs during the live capture;
+- runs the entire provider session in a child process bounded by the parent deadline.
 
-Prereqs: OpenD gateway running and reachable, `futu` SDK installed in the
-active Python environment (`.venv312` in this repo).
-
-Smoke run (2-5 minutes, verify mechanics before a longer run):
+Example:
 
 ```bash
-cd tools/provider_semantics/futu
-python wave1_runner.py --host 127.0.0.1 --port 11111 \
-    --market HK --symbols HK.00700 --duration 150 \
-    --stream-types QUOTE,K_1M --output-dir runs
+python kline_timestamp_probe.py \
+  --host 127.0.0.1 --port 11111 \
+  --symbol US.AAPL --session RTH --duration 4200
 ```
 
-Full Wave 1 run (longer duration, add a configured low-liquidity symbol for
-F10 -- the harness will NOT guess one on its own):
+A timeout is incomplete evidence and must not be adjudicated.
+
+### 2. Per-RPC current/history snapshots
+
+`kline_snapshot_probe.py`
+
+Every current/history observation uses its own bounded child process, so a hung synchronous SDK call invalidates only that observation.
 
 ```bash
-python wave1_runner.py --host 127.0.0.1 --port 11111 \
-    --market HK --symbols HK.00700 --duration 900 \
-    --stream-types QUOTE,K_1M --output-dir runs \
-    --low-liquidity-symbol HK.XXXXX
+python kline_snapshot_probe.py \
+  --host 127.0.0.1 --port 11111 \
+  --symbol US.AAPL --session RTH \
+  --repeat 3 --repeat-delay 120 --rpc-timeout 30
 ```
 
-If `--low-liquidity-symbol` is omitted, F10's result is
-`NEEDS_MANUAL_SYMBOL` rather than the harness silently picking an obscure
-instrument.
+Same-day historical dates are derived from `America/New_York`, never from the execution host's local timezone.
 
-CLI flags: `--host`, `--port`, `--market`, `--symbols`, `--duration`,
-`--stream-types`, `--output-dir`, plus harness-specific
-`--entitlement-markets`, `--entitlement-symbols`, `--invalid-symbol`,
-`--low-liquidity-symbol`. No credentials/tokens are ever printed or written
-to evidence files -- `models.scrub_secrets()` redacts anything shaped like
-a secret before it reaches disk, enforced by `harness_selftest.py`.
+### 3. Offline mechanical analysis
 
-## Self-tests
+`analyze_kline_timestamp_semantics.py`
 
-```bash
-cd tools/provider_semantics/futu
-python -m pytest harness_selftest.py -v
-```
+The analyzer reports competing-hypothesis observations only:
 
-These test recorder/model **mechanics only** (JSONL append-only behavior,
-run-directory immutability, UTC timestamp shape, monotonic sequencing under
-concurrency, secret redaction, result-status validation) using one fake
-mocked callback shape solely to prove the recorder ingests provider-shaped
-payloads without dropping fields. **The mock is never cited as evidence
-about real Futu behavior** -- only a live run against a reachable OpenD
-produces evidence usable for semantic adjudication.
+- first callback vs provider `time_key`;
+- first callback vs candidate interval start if key is interpreted as interval end;
+- K60 `:30` vs `:00` grid compatibility;
+- repeated same-key OHLCV/turnover mutation;
+- repeated current/history same-key mutation.
 
-## What this harness does NOT do
+It deliberately emits `MECHANICAL_OBSERVATION_ONLY` and cannot self-promote a provider fact to VERIFIED.
 
-- It does not declare architectural truth from one observation. A short
-  run producing 20 consistent samples is `PARTIALLY_VERIFIED`, not
-  `VERIFIED`, unless the evidence is discriminating enough to rule out
-  competing interpretations.
-- It does not attach a timezone to a naive provider timestamp string. Any
-  parsed candidate is labeled `interpretation_candidate` and stored
-  alongside -- never in place of -- the raw text.
-- It does not map an observed SDK field to `DeliveryMode.REALTIME` (or any
-  other production enum) unless the SDK response directly and
-  unambiguously evidences that mapping.
-- It does not run Wave 2 (reconnect/catch-up) experiments.
+### 4. Mechanics tests
+
+`tests/test_futu_kline_timestamp_semantics_tools.py`
+
+Research Radar CI explicitly executes these tests. They validate evidence-tool logic and anti-false-promotion behavior only; they do not substitute for a live OpenD run.
+
+## Evidence rules
+
+1. Every live run gets a fresh output path; previous evidence is never rewritten.
+2. Raw provider payload is preserved before interpretation.
+3. Provider timestamp strings stay raw in evidence; timezone interpretation is recorded separately.
+4. Failed, timed-out or partial runs do not become semantic truth.
+5. A single scope does not generalize across market, K type, session or SDK/OpenD version.
+6. No currentness threshold may be invented while K15/K60 timestamp semantics remain unresolved.
+7. No order/account/trading-state calls are permitted in provider-semantics tools.
+
+## Prior Wave 1 layout and safety
+
+Wave 1 uses `models.py`, `recorder.py`, `wave1_runner.py` and `harness_selftest.py`, with raw `events.jsonl`/`sdk_calls.jsonl` and write-once metadata/observations/results artifacts. See git history and the evidence contract for detailed Wave 1/Wave 2 provenance.
