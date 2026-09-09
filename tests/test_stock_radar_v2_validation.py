@@ -174,6 +174,66 @@ def test_daily_qa_compares_legacy_offset_rows_by_instant_not_iso_text() -> None:
     assert summary["passed"] == 1
 
 
+def test_daily_qa_rejects_ambiguous_legacy_naive_timestamp() -> None:
+    queue = ValidationQueue()
+    queue._connection.execute(
+        """
+        INSERT INTO stock_radar_validation_queue
+            (validation_id, signal_id, signal_type, signal_state, outcome,
+             evidence_json, created_at, resolved_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "legacy-naive",
+            "legacy-naive",
+            "breakout",
+            "confirmed",
+            "passed",
+            "{}",
+            "2026-09-10T00:30:00",
+            None,
+        ),
+    )
+    queue._connection.commit()
+
+    with pytest.raises(ValueError, match="ambiguous legacy timestamps"):
+        DailyQA(queue).summarize(
+            "breakout",
+            day=date(2026, 9, 10),
+            timezone_name="Asia/Shanghai",
+        )
+
+
+def test_daily_qa_rejects_unparseable_legacy_timestamp() -> None:
+    queue = ValidationQueue()
+    queue._connection.execute(
+        """
+        INSERT INTO stock_radar_validation_queue
+            (validation_id, signal_id, signal_type, signal_state, outcome,
+             evidence_json, created_at, resolved_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "legacy-bad",
+            "legacy-bad",
+            "breakout",
+            "confirmed",
+            "passed",
+            "{}",
+            "not-a-timestamp",
+            None,
+        ),
+    )
+    queue._connection.commit()
+
+    with pytest.raises(ValueError, match="ambiguous legacy timestamps"):
+        DailyQA(queue).summarize(
+            "breakout",
+            day=date(2026, 9, 10),
+            timezone_name="Asia/Shanghai",
+        )
+
+
 def test_seven_failures_in_last_ten_trigger_qa_alert_and_review() -> None:
     queue = ValidationQueue()
     _resolved(queue, "breakout", ["failed"] * 7 + ["passed"] * 3)
