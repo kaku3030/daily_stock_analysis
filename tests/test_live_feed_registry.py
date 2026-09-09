@@ -182,3 +182,50 @@ def test_only_intent_mutations_advance_revision_while_observations_preserve_epoc
     assert readded.revision == 3
     assert readded.entries[0].stream_subscription_epoch == first_epoch + 1
     assert readded.entries[0].control_plane_state is ControlPlaneState.DESIRED
+
+
+def test_provider_observation_does_not_make_same_intent_command_result_stale() -> None:
+    from datetime import datetime, timezone
+
+    from src.services.live_feed.commands import (
+        FakeProviderCommandExecutor,
+        ProviderCommandResult,
+        ProviderCommandType,
+        is_command_result_stale,
+    )
+    from src.services.live_feed.controller import LiveFeedController
+
+    now = datetime(2026, 9, 10, 0, 0, 0, tzinfo=timezone.utc)
+    controller = LiveFeedController(
+        runtime_instance_id="runtime-1",
+        provider_id="futu",
+        command_executor=FakeProviderCommandExecutor(),
+        now_utc=lambda: now,
+    )
+    controller.request_add_desired(KEY)
+    controller.process_pending()
+    command = controller.submit_command(
+        ProviderCommandType.SUBSCRIBE,
+        semantic_stream_key=KEY,
+        stream_subscription_epoch=1,
+    )
+    assert command.desired_registry_revision == 1
+
+    controller.request_set_control_plane_state(KEY, ControlPlaneState.REQUESTED)
+    controller.process_pending()
+    current = controller.snapshot()
+    assert current.desired_registry_revision == 1
+
+    result = ProviderCommandResult(
+        command_id=command.command_id,
+        command_type=command.command_type,
+        succeeded=True,
+        controller_generation=command.controller_generation,
+        desired_registry_revision=command.desired_registry_revision,
+        completed_at=now,
+    )
+    assert not is_command_result_stale(
+        result,
+        current_controller_generation=current.controller_generation,
+        current_desired_registry_revision=current.desired_registry_revision,
+    )
