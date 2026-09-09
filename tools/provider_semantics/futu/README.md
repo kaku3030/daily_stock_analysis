@@ -82,6 +82,7 @@ Research Radar CI explicitly executes these tests. They validate evidence-tool l
 5. A single scope does not generalize across market, K type, session or SDK/OpenD version.
 6. No currentness threshold may be invented while K15/K60 timestamp semantics remain unresolved.
 7. No order/account/trading-state calls are permitted in provider-semantics tools.
+8. The closure pack may change evidence scripts, tests, CI wiring and governance docs only; it must not modify production provider routing, currentness logic or trading behavior.
 
 ## Prior Wave 1 layout and safety
 
