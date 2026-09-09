@@ -205,6 +205,10 @@ These require their own scoped observations. A normal midday run cannot close th
 
 Research Radar CI is explicitly wired to execute this test file so an evidence-tool PR cannot appear green while skipping its own mechanics tests.
 
+## Evidence-tool freeze boundary pending provider observation
+
+The closure-pack mechanics are now intentionally stable enough for CI and external execution. Further code expansion should be driven by a concrete failed/incomplete provider run, not by speculative convenience features. Until live US K15/K60 evidence exists, this lane should prefer reviewing/collecting evidence over adding more harness surface.
+
 ## Promotion / governance result
 
 This evidence task does **not** authorize a currentness implementation or threshold.
