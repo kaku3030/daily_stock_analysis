@@ -19,6 +19,28 @@ from .notifications import RadarNotifier
 VALID_OUTCOMES = frozenset({"pending", "passed", "failed"})
 
 
+def _canonical_utc_iso(value: datetime | None, *, field_name: str) -> str:
+    """Return an aware datetime as canonical UTC ISO text.
+
+    Validation timestamps participate in ordered SQLite range queries, so the
+    storage boundary must own one clock domain.  Naive/ambiguous datetimes are
+    rejected rather than silently interpreted as local or UTC time.
+    """
+
+    timestamp = value or datetime.now(timezone.utc)
+    if not isinstance(timestamp, datetime):
+        raise ValueError(f"{field_name} must be a datetime")
+    if timestamp.tzinfo is None:
+        raise ValueError(f"{field_name} must be timezone-aware")
+    try:
+        offset = timestamp.utcoffset()
+    except Exception as exc:  # pragma: no cover - defensive broken tzinfo
+        raise ValueError(f"{field_name} has an unusable timezone offset") from exc
+    if offset is None:
+        raise ValueError(f"{field_name} must have a usable timezone offset")
+    return timestamp.astimezone(timezone.utc).isoformat()
+
+
 @dataclass(frozen=True)
 class ValidationItem:
     validation_id: str
@@ -75,7 +97,7 @@ class ValidationQueue:
     ) -> ValidationItem:
         if str(signal_state).lower() != "confirmed":
             raise ValueError("only Confirmed signals enter the Validation Queue")
-        timestamp = (created_at or datetime.now(timezone.utc)).isoformat()
+        timestamp = _canonical_utc_iso(created_at, field_name="created_at")
         validation_id = uuid4().hex
         self._connection.execute(
             """
@@ -110,6 +132,7 @@ class ValidationQueue:
         current = self.get(validation_id)
         merged_evidence = dict(current.evidence)
         merged_evidence.update(dict(evidence or {}))
+        resolved_timestamp = _canonical_utc_iso(resolved_at, field_name="resolved_at")
         self._connection.execute(
             """
             UPDATE stock_radar_validation_queue
@@ -119,7 +142,7 @@ class ValidationQueue:
             (
                 normalized,
                 json.dumps(merged_evidence, ensure_ascii=False, sort_keys=True),
-                (resolved_at or datetime.now(timezone.utc)).isoformat(),
+                resolved_timestamp,
                 validation_id,
             ),
         )
@@ -234,10 +257,10 @@ class DailyQA:
 
         ValidationQueue timestamps are stored as timezone-aware UTC ISO text.
         A reporting day, however, belongs to the caller's configured market/
-        reporting timezone.  Comparing ``YYYY-MM-DD`` substrings from those
-        two clock domains drops valid rows around local midnight.  Convert
-        both local-midnight boundaries to UTC and query the half-open interval
-        instead.  This also keeps DST-capable zones correct without a fixed
+        reporting timezone. Comparing ``YYYY-MM-DD`` substrings from those two
+        clock domains drops valid rows around local midnight. Convert both
+        local-midnight boundaries to UTC and query the half-open interval
+        instead. This also keeps DST-capable zones correct without a fixed
         hour-offset assumption.
         """
 
