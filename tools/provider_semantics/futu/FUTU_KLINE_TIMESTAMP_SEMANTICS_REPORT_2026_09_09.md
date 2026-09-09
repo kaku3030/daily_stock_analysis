@@ -64,7 +64,7 @@ Existing controlled Stock Razor evidence:
 | K_15M `time_key` means bar end | UNKNOWN | Same. Existing K_1M empirical end-boundary evidence is K_1M/HK-only. | Cannot assert. |
 | K_60M `time_key` means bar start | UNKNOWN | Official docs only say `Time` / `Candlestick time`. No controlled K_60M run in current evidence registry. | Cannot assert. |
 | K_60M `time_key` means bar end | UNKNOWN | Same. | Cannot assert. |
-| US K_15M RTH bucket anchoring | UNKNOWN | Official docs define K_15M and US session selection but not bucket boundaries. | 09:30 vs clock-anchor cannot be inferred. |
+| US K_15M RTH bucket anchoring | UNKNOWN | Official docs define K_15M and US session selection but not bucket boundaries. | 09:30 vs clock-anchor cannot be inferred from documentation. |
 | US K_60M RTH bucket anchoring | UNKNOWN | Official docs define K_60M and RTH but do not state 09:30-anchor or clock-hour anchor. | Expected 60m sequence remains unknown. |
 | US regular trading session can be selected explicitly | VERIFIED | Official `Session.RTH` definition and historical/subscription session parameters. | Session scope can be explicit, but this does not define candle boundaries. |
 | Standard historical request excludes US pre/after-hours by default | VERIFIED | `extended_time=False` default and explicit session controls. | Default request must not be assumed to contain ETH data. |
@@ -96,7 +96,7 @@ Until direct US K15/K60 evidence closes the required semantics:
 
 ## Executable controlled empirical closure pack
 
-This branch now contains three evidence-only tools. None is production code.
+This branch contains three evidence-only tools. None is production code.
 
 ### A. `kline_timestamp_probe.py` — long live callback capture
 
@@ -178,7 +178,7 @@ Observe multiple transitions and preferably the first RTH bucket:
 - all key minutes at `:00` are compatible with a clock-hour grid;
 - first-callback timing against the key distinguishes start-like vs end-like behavior.
 
-Do not manufacture the final expected sequence until first and last RTH buckets are directly observed.
+These are candidate patterns for empirical discrimination, not official contracts. Do not manufacture the final expected sequence until first and last RTH buckets are directly observed.
 
 ### Forming-bar behavior
 
