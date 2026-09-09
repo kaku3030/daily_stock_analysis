@@ -10,6 +10,10 @@ not the entire evidence pack.
 The parent writes one immutable JSON file containing raw child outcomes. Child
 SDK logs may appear on stdout, so the structured result is emitted on a unique
 sentinel-prefixed line and parsed independently from incidental logging.
+
+Historical and current observations can be selected independently.  This is
+intentional: a historical half-day evidence pack must not silently mix an old
+trade date with today's current K-line observations.
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ from zoneinfo import ZoneInfo
 HERE = Path(__file__).resolve().parent
 STREAM_TYPES = ("K_15M", "K_60M")
 SESSION_NAMES = ("RTH", "ETH", "ALL")
+OPERATION_NAMES = ("history", "current", "both")
 ET = ZoneInfo("America/New_York")
 RESULT_SENTINEL = "__STOCK_RAZOR_FUTU_EVIDENCE_JSON__="
 
@@ -77,6 +82,16 @@ def _ktype_value(ft, name: str):
     return value
 
 
+def _validate_trade_date(value: str | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%d")
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("trade date must use YYYY-MM-DD") from exc
+    return parsed.strftime("%Y-%m-%d")
+
+
 def _child_operation(args: argparse.Namespace) -> int:
     try:
         import futu as ft
@@ -88,7 +103,8 @@ def _child_operation(args: argparse.Namespace) -> int:
         return 3
 
     observed_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
-    local_trade_date = datetime.now(ET).strftime("%Y-%m-%d")
+    current_trade_date = datetime.now(ET).strftime("%Y-%m-%d")
+    history_trade_date = args.history_trade_date or current_trade_date
     ctx = None
     started = time.monotonic()
     try:
@@ -111,8 +127,8 @@ def _child_operation(args: argparse.Namespace) -> int:
         if args.operation == "history":
             result = ctx.request_history_kline(
                 args.symbol,
-                start=local_trade_date,
-                end=local_trade_date,
+                start=history_trade_date,
+                end=history_trade_date,
                 ktype=ktype,
                 autype=ft.AuType.NONE,
                 max_count=1000,
@@ -154,7 +170,13 @@ def _child_operation(args: argparse.Namespace) -> int:
             "ktype": args.ktype,
             "session": args.session,
             "symbol": args.symbol,
-            "us_eastern_trade_date": local_trade_date,
+            "us_eastern_current_trade_date": current_trade_date,
+            "requested_history_trade_date": history_trade_date if args.operation == "history" else None,
+            "history_trade_date_source": (
+                "EXPLICIT_ARGUMENT" if args.operation == "history" and args.history_trade_date
+                else "CURRENT_US_EASTERN_DATE" if args.operation == "history"
+                else None
+            ),
             "futu_sdk_version": str(getattr(ft, "__version__", "unknown")),
             "opend_version": opend_version,
             "raw_global_state": raw_global_state,
@@ -204,6 +226,8 @@ def _run_one_child(args: argparse.Namespace, operation: str, ktype: str) -> dict
         "--num",
         str(args.num),
     ]
+    if args.history_trade_date:
+        command.extend(["--history-trade-date", args.history_trade_date])
     started = time.monotonic()
     try:
         proc = subprocess.run(command, capture_output=True, text=True, timeout=args.rpc_timeout)
@@ -233,6 +257,12 @@ def _run_one_child(args: argparse.Namespace, operation: str, ktype: str) -> dict
         }
 
 
+def _selected_operations(name: str) -> tuple[str, ...]:
+    if name == "both":
+        return ("history", "current")
+    return (name,)
+
+
 def _parent_run(args: argparse.Namespace) -> int:
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S-%fZ")
@@ -241,8 +271,9 @@ def _parent_run(args: argparse.Namespace) -> int:
         raise FileExistsError(output_path)
 
     observations: list[dict[str, Any]] = []
+    operations = _selected_operations(args.operations)
     for repetition in range(args.repeat):
-        for operation in ("history", "current"):
+        for operation in operations:
             for ktype in STREAM_TYPES:
                 observations.append({
                     "repetition": repetition + 1,
@@ -258,10 +289,12 @@ def _parent_run(args: argparse.Namespace) -> int:
         "created_at_utc": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
         "symbol": args.symbol,
         "session": args.session,
+        "operations": list(operations),
+        "history_trade_date": args.history_trade_date,
         "repeat": args.repeat,
         "repeat_delay_seconds": args.repeat_delay,
         "rpc_timeout_seconds": args.rpc_timeout,
-        "timezone_rule": "same-day history uses America/New_York trade date",
+        "timezone_rule": "history uses explicit trade date when supplied, otherwise America/New_York current date",
         "semantic_adjudication": "NOT_PERFORMED_BY_CAPTURE_TOOL",
         "observations": observations,
     }
@@ -276,6 +309,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=11111)
     parser.add_argument("--symbol", default="US.AAPL")
     parser.add_argument("--session", choices=SESSION_NAMES, default="RTH")
+    parser.add_argument("--operations", choices=OPERATION_NAMES, default="both")
+    parser.add_argument("--history-trade-date", type=_validate_trade_date, default=None)
     parser.add_argument("--repeat", type=int, default=3)
     parser.add_argument("--repeat-delay", type=int, default=120)
     parser.add_argument("--rpc-timeout", type=float, default=30.0)
