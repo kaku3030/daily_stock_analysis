@@ -1,5 +1,5 @@
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -53,6 +53,48 @@ def test_daily_qa_summarizes_without_changing_signal() -> None:
 
     assert summary["failed"] == 1
     assert signal == before
+
+
+def test_validation_queue_canonicalizes_supplied_aware_timestamps_to_utc() -> None:
+    queue = ValidationQueue()
+    plus_eight = timezone(timedelta(hours=8))
+    local_timestamp = datetime(2026, 9, 10, 0, 30, tzinfo=plus_eight)
+
+    item = queue.enqueue(
+        signal_id="s-utc",
+        signal_type="breakout",
+        signal_state="confirmed",
+        created_at=local_timestamp,
+    )
+    resolved = queue.resolve(
+        item.validation_id,
+        "passed",
+        resolved_at=local_timestamp,
+    )
+
+    assert resolved.created_at == "2026-09-09T16:30:00+00:00"
+    assert resolved.resolved_at == "2026-09-09T16:30:00+00:00"
+
+
+def test_validation_queue_rejects_naive_explicit_timestamps() -> None:
+    queue = ValidationQueue()
+    naive = datetime(2026, 9, 10, 0, 30)
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        queue.enqueue(
+            signal_id="s-naive",
+            signal_type="breakout",
+            signal_state="confirmed",
+            created_at=naive,
+        )
+
+    item = queue.enqueue(
+        signal_id="s-aware",
+        signal_type="breakout",
+        signal_state="confirmed",
+    )
+    with pytest.raises(ValueError, match="timezone-aware"):
+        queue.resolve(item.validation_id, "passed", resolved_at=naive)
 
 
 def test_seven_failures_in_last_ten_trigger_qa_alert_and_review() -> None:
