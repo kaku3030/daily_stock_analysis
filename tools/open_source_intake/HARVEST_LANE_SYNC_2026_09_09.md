@@ -36,9 +36,10 @@ Status: ACTIVE SUB-LANE under the Stock Razor / Radar program.
   - `tests/test_futu_kline_timestamp_semantics_tools.py`: mechanics / anti-false-promotion tests.
 - Safety split: long live callback capture is physically separated from synchronous snapshot/history RPCs so a hanging SDK call cannot destroy the long capture.
 - Same-day historical observation derives date from `America/New_York`, not execution-host timezone.
+- Snapshot child output now uses a unique sentinel-prefixed JSON line so incidental Futu/OpenD stdout logs cannot corrupt structured evidence; unrelated stdout is preserved separately.
 - Research Radar workflow has explicit path trigger + pytest execution for the closure-pack mechanics tests.
 - Semantic promotion remains manual/provider-evidence review only. The analyzer cannot self-declare VERIFIED.
-- Current pre-CI branch head: `8bd99c51a69a36be225fbadbc339d31fe59fb7f1` before this sync-only commit. CI truth must be checked on the resulting current PR head; do not inherit earlier checks.
+- Current pre-sync branch head after latest evidence hardening: `881a0bec0caa2e55fa5d8aa914e2bd343d6920eb`. Exact CI must be checked on the resulting current PR head; do not inherit earlier checks.
 
 ### Data Reliability
 - PR #35 — malformed provider numerics become explicit Health evidence; automated gates passed on validated head.
