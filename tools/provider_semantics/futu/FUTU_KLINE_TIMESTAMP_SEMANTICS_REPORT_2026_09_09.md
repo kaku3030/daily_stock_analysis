@@ -47,6 +47,8 @@ Official Futu OpenAPI v10.10 documentation:
    - current `Session` enum includes RTH / ETH / ALL;
    - no start/end semantic tag is exposed for `time_key`.
 
+No Stock Razor production adapter behavior was used as provider-semantic evidence.
+
 Existing controlled Stock Razor evidence:
 
 - `tools/provider_semantics/futu/FUTU_SEMANTIC_CONTRACT_V0_1.md`
@@ -152,7 +154,7 @@ Run `Session.ALL` separately. Repeated same-key value mutation is evidence candi
 Consumes raw live and snapshot evidence and reports only mechanical observations:
 
 - first callback minus provider `time_key`;
-- first callback minus candidate period start if the key is interpreted as interval end;
+- first callback minus candidate interval start if the key is interpreted as interval end;
 - K_60M minute residue compatible with 09:30-anchor (`:30`) vs clock-hour (`:00`);
 - repeated material mutations under the same `time_key`;
 - same-key mutation across repeated historical/current snapshots.
@@ -193,7 +195,7 @@ These require their own scoped observations. A normal midday run cannot close th
 
 ## Mechanics validation
 
-`tests/test_futu_kline_timestamp_semantics_tools.py` now covers:
+`tests/test_futu_kline_timestamp_semantics_tools.py` covers:
 
 - 09:30-anchor vs clock-hour K60 mechanical classification;
 - end-boundary candidate timing math;
