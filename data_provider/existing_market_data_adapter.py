@@ -155,6 +155,20 @@ class ExistingMarketDataAdapter(MarketDataAdapter):
             quality_flags=health.quality_flags,
         )
 
+    def _set_missing_bar_health(self, *, timestamp_mismatch: bool = False) -> None:
+        flags = ["MISSING_BAR"]
+        if timestamp_mismatch:
+            flags.append("TIMESTAMP_MISMATCH")
+        self._last_health = evaluate_health(
+            freshness=0,
+            completeness=0,
+            timestamp=0,
+            provider=1,
+            continuity=0,
+            cross_check=0.5,
+            quality_flags=flags,
+        )
+
     def get_bars(
         self,
         symbol: str,
@@ -174,18 +188,26 @@ class ExistingMarketDataAdapter(MarketDataAdapter):
             days=max(limit or 30, 1),
         )
         if frame is None or frame.empty:
+            self._set_missing_bar_health()
             return []
 
         rows: list[Bar] = []
         selected = frame.tail(limit) if limit else frame
         received_at = self._now()
         market = _market_for(symbol)
+
+        timestamp_mismatch = False
+        timestamped_rows: list[tuple[datetime, object]] = []
         for _, row in selected.iterrows():
             timestamp = _utc_datetime(row.get("date"))
             if timestamp is None:
+                timestamp_mismatch = True
                 continue
+            timestamped_rows.append((timestamp, row))
 
-            flags: list[str] = ["NOT_CROSS_CHECKED"]
+        batch_flags = ["TIMESTAMP_MISMATCH"] if timestamp_mismatch else []
+        for timestamp, row in timestamped_rows:
+            flags: list[str] = ["NOT_CROSS_CHECKED", *batch_flags]
             numeric: dict[str, float] = {}
             for name in ("open", "high", "low", "close", "volume"):
                 number, malformed = _finite_float(row.get(name))
@@ -245,8 +267,11 @@ class ExistingMarketDataAdapter(MarketDataAdapter):
                     quality_flags=health.quality_flags,
                 )
             )
+
         if rows:
             self._last_health = rows[-1].health or self._last_health
+        else:
+            self._set_missing_bar_health(timestamp_mismatch=timestamp_mismatch)
         return rows
 
     def subscribe(
