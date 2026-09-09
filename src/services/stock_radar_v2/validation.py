@@ -22,12 +22,12 @@ VALID_OUTCOMES = frozenset({"pending", "passed", "failed"})
 def _canonical_utc_iso(value: datetime | None, *, field_name: str) -> str:
     """Return an aware datetime as canonical UTC ISO text.
 
-    Validation timestamps participate in ordered SQLite range queries, so the
-    storage boundary must own one clock domain.  Naive/ambiguous datetimes are
-    rejected rather than silently interpreted as local or UTC time.
+    Validation timestamps participate in ordered time-range queries, so new
+    persistence owns one clock domain. Naive/ambiguous datetimes and supplied
+    non-datetime values fail closed rather than being silently interpreted.
     """
 
-    timestamp = value or datetime.now(timezone.utc)
+    timestamp = datetime.now(timezone.utc) if value is None else value
     if not isinstance(timestamp, datetime):
         raise ValueError(f"{field_name} must be a datetime")
     if timestamp.tzinfo is None:
@@ -253,15 +253,13 @@ class DailyQA:
         day: date | None = None,
         timezone_name: str = "UTC",
     ) -> dict[str, Any]:
-        """Summarize one reporting *local calendar day* over UTC-stored rows.
+        """Summarize one reporting local calendar day over timestamped rows.
 
-        ValidationQueue timestamps are stored as timezone-aware UTC ISO text.
-        A reporting day, however, belongs to the caller's configured market/
-        reporting timezone. Comparing ``YYYY-MM-DD`` substrings from those two
-        clock domains drops valid rows around local midnight. Convert both
-        local-midnight boundaries to UTC and query the half-open interval
-        instead. This also keeps DST-capable zones correct without a fixed
-        hour-offset assumption.
+        New ValidationQueue timestamps are canonical UTC ISO text. Older rows
+        may contain equivalent aware ISO timestamps with non-UTC offsets, so
+        membership is compared as an instant via SQLite ``julianday`` rather
+        than by lexical timestamp text. Unparseable legacy timestamps evaluate
+        to NULL and fail closed out of the reporting interval.
         """
 
         zone = ZoneInfo(timezone_name)
@@ -275,7 +273,9 @@ class DailyQA:
         rows = self.queue._connection.execute(
             """
             SELECT outcome, COUNT(*) AS count FROM stock_radar_validation_queue
-            WHERE signal_type = ? AND created_at >= ? AND created_at < ?
+            WHERE signal_type = ?
+              AND julianday(created_at) >= julianday(?)
+              AND julianday(created_at) < julianday(?)
             GROUP BY outcome
             """,
             (signal_type, start_utc, end_utc),
