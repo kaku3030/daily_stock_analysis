@@ -11,6 +11,14 @@ Status: ACTIVE SUB-LANE under the Stock Razor / Radar program.
 - Architecture/Promotion decisions remain governed by the Control Tower and Radar main line.
 - Durable synchronization should be written to shared GitHub governance/evidence surfaces so all lanes read the same source of truth rather than rely on conversational memory.
 
+## Cross-lane sharing authorization
+- The user has explicitly authorized the Radar main line, Open-Source Intake / Harvesting Lane, and Architecture & Promotion Control Tower to **actively share, retrieve, reuse, cite, and synchronize** project material among themselves without requesting per-item approval.
+- This authorization covers project-relevant code, tests, evidence, provider semantics, research notes, frozen contracts, review findings, PR state, CI state, defects, fixtures, harvest candidates, validation artifacts, implementation briefs, and promotion-readiness evidence.
+- A lane should proactively read another lane's durable GitHub evidence when that material can prevent duplicate work, conflicting assumptions, stale status, or architecture drift.
+- Sharing does **not** transfer promotion authority: Harvest findings may be consumed by Control Tower/main line, but SHADOW/CORE decisions remain under the existing governance model.
+- Existing frozen-scope boundaries still apply. Cross-lane access is permission to coordinate, not permission to silently expand product scope.
+- The default coordination behavior is therefore **share-first / reuse-first**, not ask-first.
+
 ## Current Harvest outputs
 
 ### LiveFeed / provider reliability
@@ -43,6 +51,11 @@ Status: ACTIVE SUB-LANE under the Stock Razor / Radar program.
 - PR #40 exact head `e4a8c5a3e6f1220bc86173fb860a2136f111b109`: **Research Radar Tests PASS; repository CI PASS**.
 - Therefore PR #40 may be considered `VALIDATING` in Harvest terminology, but remains Draft and is not SHADOW/CORE.
 
+### Futu K-line timestamp semantics P0
+- PR #41 — evidence-only report for K_15M/K_60M timestamp semantics; no production code changes.
+- Official documentation does not establish start-vs-end semantics or US 60m alignment, so currentness timing freeze remains BLOCKED.
+- Controlled closure work is being converted into bounded, read-only provider probes so US K_15M/K_60M evidence can be captured without relying on production adapters.
+
 ## External candidate dispositions
 - Hypothesis: DIRECT USE for tests / VALIDATING.
 - Toxiproxy: TEST-REUSE candidate; defer dependency until fine-grained latency/jitter/asymmetry faults become explicit acceptance criteria.
@@ -58,11 +71,12 @@ Status: ACTIVE SUB-LANE under the Stock Razor / Radar program.
 - TickFlow: existing optional A-share provider already present in Stock Razor; useful, but permission/capability semantics remain explicit.
 
 ## Next Harvest priorities
-1. A-share A0.2 additive DataCapability lineage exposure and reconciliation-safe tests, without routing changes.
-2. A-share intraday capability inventory for 15m/1H and currentness evidence boundaries.
-3. Continue Currentness / Continuity / RecoveryCandidate harvest against frozen LiveFeed contracts.
-4. Validate stacked Data R2 independently after its base is stable.
-5. Keep Control Tower/main line informed of any architecture-impacting finding before implementation exceeds frozen boundaries.
+1. Finish bounded US Futu K_15M/K_60M empirical closure pack and preserve UNKNOWN until real evidence exists.
+2. A-share A0.2 additive DataCapability lineage exposure and reconciliation-safe tests, without routing changes.
+3. A-share intraday capability inventory for 15m/1H and currentness evidence boundaries.
+4. Continue Currentness / Continuity / RecoveryCandidate harvest against frozen LiveFeed contracts.
+5. Validate stacked Data R2 independently after its base is stable.
+6. Keep Control Tower/main line informed of any architecture-impacting finding before implementation exceeds frozen boundaries.
 
 ## Handoff truth
 Harvest produces evidence and bounded adaptations. Promotion authority remains outside this lane.
