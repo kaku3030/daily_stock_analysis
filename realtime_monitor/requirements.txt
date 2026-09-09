@@ -1,0 +1,4 @@
+anthropic>=0.40.0
+futu-api==10.8.6808
+mcp>=1.0.0
+openai>=1.0.0

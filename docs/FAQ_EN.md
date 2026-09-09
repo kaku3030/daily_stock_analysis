@@ -342,12 +342,12 @@ Work through the following 5 checkpoints in order:
 **Solution**:
 
 1. Download only from the project's [GitHub Releases](https://github.com/ZhuLinsen/daily_stock_analysis/releases), and select the package matching your Mac architecture. Do not bypass Gatekeeper for third-party copies or files from an untrusted source.
-2. Drag `Daily Stock Analysis` into Applications, then first try **System Settings → Privacy & Security → Open Anyway**.
+2. Drag `Stock Razor` into Applications, then first try **System Settings → Privacy & Security → Open Anyway**.
 3. If it still does not start and you have verified that it came from the official project Release, remove quarantine only from this app and launch it:
 
    ```bash
-   xattr -dr com.apple.quarantine "/Applications/Daily Stock Analysis.app"
-   open "/Applications/Daily Stock Analysis.app"
+   xattr -dr com.apple.quarantine "/Applications/Stock Razor.app"
+   open "/Applications/Stock Razor.app"
    ```
 
 Replace the path if the app is not in `/Applications`. Never run `xattr` against the entire `/Applications` directory. This is a temporary way to allow a trusted unsigned app; it is not a substitute for signing or notarization. See the [desktop packaging guide](desktop-package.md#macos-提示应用已损坏无法打开) for the complete troubleshooting notes.
