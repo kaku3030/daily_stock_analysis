@@ -2,6 +2,8 @@ import json
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from scripts.run_stock_radar_qa import run
 from src.services.stock_radar_v2.validation import ValidationQueue
 
@@ -48,10 +50,37 @@ def test_daily_run_uses_main_sqlite_and_writes_reports(tmp_path, monkeypatch) ->
     )
 
     payload = json.loads((reports / "stock_radar_daily_qa.json").read_text("utf-8"))
+    assert result["day"] == "2026-09-10"
     assert result["daily"][0]["signal_type"] == "breakout"
     assert payload["signal_types"][0]["total"] == 1
     assert payload["signal_types"][0]["passed"] == 1
     assert "不构成交易建议" in (reports / "stock_radar_daily_qa.md").read_text("utf-8")
+
+
+def test_daily_run_normalizes_injected_utc_clock_before_selecting_local_day(tmp_path, monkeypatch) -> None:
+    database = tmp_path / "stock_analysis.db"
+    reports = tmp_path / "reports"
+    monkeypatch.setenv("DATABASE_PATH", str(database))
+    monkeypatch.setenv("STOCK_RADAR_QA_OUTPUT_DIR", str(reports))
+    monkeypatch.setenv("STOCK_RADAR_TIMEZONE", "Asia/Shanghai")
+
+    local_now = datetime(2026, 9, 10, 0, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+    utc_now = local_now.astimezone(timezone.utc)
+    _resolved(database, "breakout", ["passed"], created_at=utc_now)
+
+    result = run("daily", now=utc_now)
+
+    assert result["day"] == "2026-09-10"
+    assert result["daily"][0]["total"] == 1
+
+
+def test_daily_run_rejects_naive_injected_clock(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "stock_analysis.db"))
+    monkeypatch.setenv("STOCK_RADAR_QA_OUTPUT_DIR", str(tmp_path / "reports"))
+    monkeypatch.setenv("STOCK_RADAR_TIMEZONE", "Asia/Shanghai")
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        run("daily", now=datetime(2026, 9, 10, 0, 30))
 
 
 def test_daily_run_uses_half_open_configured_local_day_boundaries(tmp_path, monkeypatch) -> None:
