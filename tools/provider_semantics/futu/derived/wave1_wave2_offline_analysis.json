@@ -1,0 +1,95 @@
+{
+  "analysis_revision": "offline_v1",
+  "created_at": "2026-09-08T09:11:10.202599+00:00",
+  "callback_thread_map": [
+    {
+      "callback_type": "QUOTE",
+      "thread_id": 15364,
+      "count": 101,
+      "first_seen": "2026-09-08T06:26:06.726690+00:00",
+      "last_seen": "2026-09-08T06:28:36.036335+00:00"
+    },
+    {
+      "callback_type": "K_1M",
+      "thread_id": 15364,
+      "count": 95,
+      "first_seen": "2026-09-08T06:26:06.872447+00:00",
+      "last_seen": "2026-09-08T06:28:36.251801+00:00"
+    },
+    {
+      "callback_type": "QUOTE",
+      "thread_id": 10396,
+      "count": 260,
+      "first_seen": "2026-09-08T06:32:21.857211+00:00",
+      "last_seen": "2026-09-08T06:40:18.357393+00:00"
+    },
+    {
+      "callback_type": "K_1M",
+      "thread_id": 10396,
+      "count": 253,
+      "first_seen": "2026-09-08T06:32:21.915688+00:00",
+      "last_seen": "2026-09-08T06:40:18.587978+00:00"
+    },
+    {
+      "callback_type": "QUOTE",
+      "thread_id": 8724,
+      "count": 21,
+      "first_seen": "2026-09-08T07:12:58.856683+00:00",
+      "last_seen": "2026-09-08T07:13:28.084687+00:00"
+    },
+    {
+      "callback_type": "QUOTE",
+      "thread_id": 8800,
+      "count": 47,
+      "first_seen": "2026-09-08T07:28:30.230685+00:00",
+      "last_seen": "2026-09-08T07:29:36.707786+00:00"
+    },
+    {
+      "callback_type": "K_1M",
+      "thread_id": 8800,
+      "count": 44,
+      "first_seen": "2026-09-08T07:28:30.235685+00:00",
+      "last_seen": "2026-09-08T07:29:37.006692+00:00"
+    },
+    {
+      "callback_type": "QUOTE",
+      "thread_id": 17488,
+      "count": 1675,
+      "first_seen": "2026-09-08T07:29:49.909690+00:00",
+      "last_seen": "2026-09-08T08:08:42.384696+00:00"
+    },
+    {
+      "callback_type": "K_1M",
+      "thread_id": 17488,
+      "count": 1416,
+      "first_seen": "2026-09-08T07:29:50.282235+00:00",
+      "last_seen": "2026-09-08T08:08:34.164693+00:00"
+    },
+    {
+      "callback_type": "QUOTE",
+      "thread_id": 17820,
+      "count": 1,
+      "first_seen": "2026-09-08T08:35:16.065692+00:00",
+      "last_seen": "2026-09-08T08:35:16.065692+00:00"
+    }
+  ],
+  "duplicate_inventory": {
+    "total_distinct_source_identity_groups": 3911,
+    "exact_duplicate_group_count": 2,
+    "exact_duplicate_groups": {
+      "('QUOTE', 'HK.00700', '16:01:06', '19030403e56377fd')": {
+        "count": 2,
+        "run_files": [
+          "runs\\2026-09-08T07-28-29-758854Z\\lifecycle.jsonl"
+        ]
+      },
+      "('QUOTE', 'HK.00700', '16:08:30', 'b05d6bf39ddba541')": {
+        "count": 2,
+        "run_files": [
+          "runs\\2026-09-08T07-28-29-758854Z\\lifecycle.jsonl",
+          "runs\\2026-09-08T08-35-00-200191Z\\lifecycle.jsonl"
+        ]
+      }
+    }
+  }
+}
