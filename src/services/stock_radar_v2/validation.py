@@ -41,6 +41,35 @@ def _canonical_utc_iso(value: datetime | None, *, field_name: str) -> str:
     return timestamp.astimezone(timezone.utc).isoformat()
 
 
+def _require_stored_absolute_timestamp(value: Any, *, field_name: str) -> None:
+    """Prove a stored ISO timestamp represents an absolute instant.
+
+    Pre-repair versions could persist caller-supplied aware offsets *or* naive
+    datetimes verbatim. SQLite ``julianday`` handles aware offsets correctly,
+    but it also accepts a timezone-less timestamp using an implicit convention.
+    That would turn an unknowable legacy instant into apparently valid QA
+    evidence. Validate the historical text first and refuse ambiguous rows.
+    """
+
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must contain an ISO timestamp")
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise ValueError(f"{field_name} is not a parseable ISO timestamp") from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"{field_name} is timezone-naive and cannot be assigned to a reporting day")
+    try:
+        offset = parsed.utcoffset()
+    except Exception as exc:  # pragma: no cover - defensive broken tzinfo
+        raise ValueError(f"{field_name} has an unusable timezone offset") from exc
+    if offset is None:
+        raise ValueError(f"{field_name} must have a usable timezone offset")
+
+
 @dataclass(frozen=True)
 class ValidationItem:
     validation_id: str
@@ -258,8 +287,8 @@ class DailyQA:
         New ValidationQueue timestamps are canonical UTC ISO text. Older rows
         may contain equivalent aware ISO timestamps with non-UTC offsets, so
         membership is compared as an instant via SQLite ``julianday`` rather
-        than by lexical timestamp text. Unparseable legacy timestamps evaluate
-        to NULL and fail closed out of the reporting interval.
+        than by lexical timestamp text. Historical rows without absolute-time
+        semantics are rejected instead of being silently localized by SQLite.
         """
 
         zone = ZoneInfo(timezone_name)
@@ -269,6 +298,24 @@ class DailyQA:
         start_utc = local_start.astimezone(timezone.utc).isoformat()
         end_utc = local_end.astimezone(timezone.utc).isoformat()
         target = target_day.isoformat()
+
+        legacy_rows = self.queue._connection.execute(
+            """
+            SELECT validation_id, created_at FROM stock_radar_validation_queue
+            WHERE signal_type = ?
+            """,
+            (signal_type,),
+        ).fetchall()
+        for row in legacy_rows:
+            try:
+                _require_stored_absolute_timestamp(
+                    row["created_at"],
+                    field_name=f"created_at[{row['validation_id']}]",
+                )
+            except ValueError as exc:
+                raise ValueError(
+                    "DailyQA cannot safely summarize a signal type containing ambiguous legacy timestamps"
+                ) from exc
 
         rows = self.queue._connection.execute(
             """
