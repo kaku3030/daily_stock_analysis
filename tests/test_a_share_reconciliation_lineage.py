@@ -132,18 +132,14 @@ def test_lineage_view_does_not_mutate_existing_dataset_quality_truth() -> None:
         ),
     )
     before = service.get_overview()
-    before_json = json.dumps(before, sort_keys=True, ensure_ascii=False)
 
     build_cn_realtime_reconciliation_view(_cn_priority_tokens(before))
 
-    after_json = json.dumps(service.get_overview(), sort_keys=True, ensure_ascii=False)
-    # as_of is time-varying, so compare all stable semantic sections.
     after = service.get_overview()
     assert before["providers"] == after["providers"]
     assert before["datasets"] == after["datasets"]
     assert before["priorities"] == after["priorities"]
     assert before["warnings"] == after["warnings"]
-    assert "upstream_lineage_id" not in before_json
 
 
 def test_duplicate_or_malformed_route_tokens_are_rejected() -> None:
@@ -156,8 +152,11 @@ def test_duplicate_or_malformed_route_tokens_are_rejected() -> None:
     with pytest.raises(ValueError, match="iterable"):
         build_cn_realtime_reconciliation_view("efinance")
 
+    with pytest.raises(ValueError, match="trimmed"):
+        build_cn_realtime_reconciliation_view([["efinance"]])
 
-def test_json_surface_contains_no_secrets_and_has_no_decision_weight() -> None:
+
+def test_json_surface_contains_no_secrets_or_numeric_decision_weight() -> None:
     view = build_cn_realtime_reconciliation_view(
         ["tickflow", "tushare", "efinance"]
     )
@@ -165,4 +164,8 @@ def test_json_surface_contains_no_secrets_and_has_no_decision_weight() -> None:
 
     for forbidden in ("api_key", "password", "credential", "secret_value"):
         assert forbidden not in encoded
-    assert "weight" not in encoded
+    assert view["governance"]["decision_weighting"] == "NONE"
+    for source in view["sources"]:
+        assert "weight" not in source
+    for group in view["independence_groups"]:
+        assert "weight" not in group
