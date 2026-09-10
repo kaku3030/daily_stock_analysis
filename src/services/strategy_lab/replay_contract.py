@@ -235,6 +235,7 @@ class InMemoryEventStore:
         self._events: list[EventRecord] = []
         self._seen_ids: set[str] = set()
         self._dropped_late_ids: set[str] = set()
+        self._event_checksums: dict[str, str] = {}
         self._max_observed_at: datetime | None = None
         self._resolver = source_authority_resolver
         self.late_event_policy = late_event_policy
@@ -244,15 +245,18 @@ class InMemoryEventStore:
         self.rejected_count = 0
 
     def append(self, event: EventRecord) -> str:
-        if event.event_id in self._seen_ids or event.event_id in self._dropped_late_ids:
-            self.duplicate_count += 1
-            return "DUPLICATE"
-
         admitted = self._admit_source(event)
         if admitted is None:
             self.rejected_count += 1
             return "REJECTED_SOURCE_AUTHORITY"
         event = admitted
+
+        prior_checksum = self._event_checksums.get(event.event_id)
+        if prior_checksum is not None:
+            if prior_checksum != event.checksum:
+                raise ValueError("event_id collision with conflicting checksum")
+            self.duplicate_count += 1
+            return "DUPLICATE"
 
         is_late = self._max_observed_at is not None and event.observed_at < self._max_observed_at
         if is_late:
@@ -260,6 +264,7 @@ class InMemoryEventStore:
             if self.late_event_policy == "DROP":
                 self.late_dropped_count += 1
                 self._dropped_late_ids.add(event.event_id)
+                self._event_checksums[event.event_id] = event.checksum
                 return "LATE_DROPPED"
 
         if self._max_observed_at is None or event.observed_at > self._max_observed_at:
@@ -267,6 +272,7 @@ class InMemoryEventStore:
         accepted = EventRecord(**{**asdict(event), "sequence_no": len(self._events) + 1})
         self._events.append(accepted)
         self._seen_ids.add(event.event_id)
+        self._event_checksums[event.event_id] = event.checksum
         return "ACCEPTED"
 
     def _admit_source(self, event: EventRecord) -> EventRecord | None:

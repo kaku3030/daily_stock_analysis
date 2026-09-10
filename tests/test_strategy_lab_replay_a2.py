@@ -117,6 +117,24 @@ def test_duplicate_input_does_not_change_effective_snapshot():
     assert duplicated.snapshot.canonical_hash == base.snapshot.canonical_hash
 
 
+def test_conflicting_duplicate_event_id_fails_loud():
+    original = theme_positive()[0]
+    conflict = replace(original, payload={"rs_delta_short": 99.0}, checksum="")
+    store = InMemoryEventStore()
+    assert store.append(original) == "ACCEPTED"
+    with pytest.raises(ValueError, match="event_id collision with conflicting checksum"):
+        store.append(conflict)
+
+
+def test_conflicting_duplicate_event_id_fails_loud_in_any_delivery_order():
+    original = theme_positive()[0]
+    conflict = replace(original, payload={"rs_delta_short": 99.0}, checksum="")
+    with pytest.raises(ValueError, match="event_id collision with conflicting checksum"):
+        replay([original, conflict], DECISION)
+    with pytest.raises(ValueError, match="event_id collision with conflicting checksum"):
+        replay([conflict, original], DECISION)
+
+
 def test_unknown_required_field_is_preserved_and_blocks_match():
     events = theme_positive()
     events[-1] = replace(events[-1], payload={}, checksum="")
@@ -295,6 +313,16 @@ def test_late_drop_policy_fails_closed_without_rewriting_store():
     assert before == after == ("newer",)
     assert store.late_count == 1
     assert store.late_dropped_count == 1
+
+
+def test_dropped_late_event_id_still_rejects_conflicting_reuse():
+    store = InMemoryEventStore(late_event_policy="DROP")
+    assert store.append(ev("newer", "X", sec=50)) == "ACCEPTED"
+    dropped = ev("older", "X", sec=40)
+    assert store.append(dropped) == "LATE_DROPPED"
+    conflict = replace(dropped, payload={"changed": True}, checksum="")
+    with pytest.raises(ValueError, match="event_id collision with conflicting checksum"):
+        store.append(conflict)
 
 
 def test_unknown_late_policy_fails_loud():
