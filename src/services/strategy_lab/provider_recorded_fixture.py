@@ -16,6 +16,7 @@ from src.services.a_share_intraday_semantics import CN_INTRADAY_ENDPOINT_EXTENSI
 from src.services.a_share_provider_lineage import CN_REALTIME_SOURCE_LINEAGE
 
 from .raw_capture import (
+    NORMALIZATION_LINEAGE_VERSION,
     NormalizationLineage,
     SealedRawCapture,
     build_row_normalization_lineage,
@@ -86,12 +87,7 @@ def _intraday_extension_payload() -> dict[str, list[str]]:
 
 
 def _assert_capture_authority_sources_still_match_accepted_versions() -> None:
-    """Guard only the *capture* factory, never historical replay/load.
-
-    Historical evidence must remain replayable after current authority drifts.
-    New capture, however, must not claim the old A0/A1 source refs if the live
-    in-repository authority has moved.
-    """
+    """Guard only the capture factory, never historical replay/load."""
 
     if stable_hash(_authority_registry_payload()) != A0_ACCEPTED_REGISTRY_DIGEST:
         raise RuntimeError("A0 provider authority changed; bump captured-authority contract")
@@ -100,7 +96,9 @@ def _assert_capture_authority_sources_still_match_accepted_versions() -> None:
 
 
 @dataclass(frozen=True)
-class CapturedProviderAuthorityEvidence:
+class _CapturedProviderAuthorityPayload:
+    """Digest-bound payload; not by itself admissible as provider authority."""
+
     schema_version: str
     source_token: str
     endpoint_id: str
@@ -163,23 +161,118 @@ class CapturedProviderAuthorityEvidence:
     def canonical_payload(self) -> dict[str, Any]:
         return self.digest_payload() | {"digest": self.digest}
 
+
+_CAPTURE_AUTHORITY_ORIGIN = object()
+
+
+class VerifiedCapturedProviderAuthority:
+    """Provider authority that can only originate from the capture-time factory.
+
+    The wrapper closes the ordinary-constructor bypass: a digest-valid arbitrary
+    payload is not enough to become authority.  This is an audit integrity
+    boundary, not a cryptographic trusted-clock claim.
+    """
+
+    __slots__ = ("_payload", "_origin")
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise TypeError("VerifiedCapturedProviderAuthority requires capture-time factory")
+
+    @classmethod
+    def _from_capture(
+        cls,
+        payload: _CapturedProviderAuthorityPayload,
+        origin: object,
+    ) -> "VerifiedCapturedProviderAuthority":
+        if origin is not _CAPTURE_AUTHORITY_ORIGIN:
+            raise ValueError("captured provider authority origin is not verified")
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "_payload", payload)
+        object.__setattr__(instance, "_origin", origin)
+        return instance
+
+    def _verified_payload(self) -> _CapturedProviderAuthorityPayload:
+        try:
+            payload = self._payload
+            origin = self._origin
+        except AttributeError as exc:
+            raise ValueError("captured provider authority is not verified") from exc
+        if origin is not _CAPTURE_AUTHORITY_ORIGIN:
+            raise ValueError("captured provider authority origin is not verified")
+        # Reconstruct to re-run all digest/source-version validation before use.
+        return _CapturedProviderAuthorityPayload(**payload.canonical_payload())
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise TypeError("VerifiedCapturedProviderAuthority is immutable")
+
+    @property
+    def source_token(self) -> str:
+        return self._verified_payload().source_token
+
+    @property
+    def endpoint_id(self) -> str:
+        return self._verified_payload().endpoint_id
+
+    @property
+    def market(self) -> str:
+        return self._verified_payload().market
+
+    @property
+    def adapter_id(self) -> str:
+        return self._verified_payload().adapter_id
+
+    @property
+    def upstream_lineage_id(self) -> str:
+        return self._verified_payload().upstream_lineage_id
+
+    @property
+    def captured_at(self) -> datetime:
+        return self._verified_payload().captured_at
+
+    @property
+    def raw_artifact_sha256(self) -> str:
+        return self._verified_payload().raw_artifact_sha256
+
+    @property
+    def capture_id(self) -> str:
+        return self._verified_payload().capture_id
+
+    @property
+    def observation_id(self) -> str:
+        return self._verified_payload().observation_id
+
+    @property
+    def a0_authority_source_ref(self) -> str:
+        return self._verified_payload().a0_authority_source_ref
+
+    @property
+    def a1_authority_source_ref(self) -> str:
+        return self._verified_payload().a1_authority_source_ref
+
+    @property
+    def digest(self) -> str:
+        return self._verified_payload().digest
+
+    def canonical_payload(self) -> dict[str, Any]:
+        return self._verified_payload().canonical_payload()
+
     def historical_resolver(self) -> SourceAuthorityResolver:
-        authority = self
+        payload = self._verified_payload()
 
         def resolve(source_token: str, endpoint_id: str, market: str) -> SourceAuthorityResolution | None:
             if (source_token, endpoint_id, market) != (
-                authority.source_token,
-                authority.endpoint_id,
-                authority.market,
+                payload.source_token,
+                payload.endpoint_id,
+                payload.market,
             ):
                 return None
             return SourceAuthorityResolution(
-                source_token=authority.source_token,
-                endpoint_id=authority.endpoint_id,
-                market=authority.market,
-                adapter_id=authority.adapter_id,
-                upstream_lineage_id=authority.upstream_lineage_id,
-                authority_ref=f"captured-provider-authority:sha256:{authority.digest}",
+                source_token=payload.source_token,
+                endpoint_id=payload.endpoint_id,
+                market=payload.market,
+                adapter_id=payload.adapter_id,
+                upstream_lineage_id=payload.upstream_lineage_id,
+                authority_ref=f"captured-provider-authority:sha256:{payload.digest}",
             )
 
         return resolve
@@ -192,8 +285,13 @@ def capture_current_a_share_provider_authority(
     source_token: str,
     endpoint_id: str,
     market: str = "cn",
-) -> CapturedProviderAuthorityEvidence:
-    """Explicit capture-time factory; never called implicitly by conversion/replay."""
+) -> VerifiedCapturedProviderAuthority:
+    """Explicit capture-time factory; conversion never calls it implicitly.
+
+    Governance note: this helper is for contemporaneous capture pipelines.  It
+    must not be used to retroactively mint historical authority for an old raw
+    artifact that did not persist authority evidence at capture time.
+    """
 
     if not isinstance(sealed, SealedRawCapture):
         raise ValueError("captured authority requires a verified SealedRawCapture")
@@ -221,7 +319,8 @@ def capture_current_a_share_provider_authority(
         "a0_authority_source_ref": A0_AUTHORITY_SOURCE_REF,
         "a1_authority_source_ref": A1_AUTHORITY_SOURCE_REF,
     }
-    return CapturedProviderAuthorityEvidence(**payload, digest=stable_hash(payload))
+    raw = _CapturedProviderAuthorityPayload(**payload, digest=stable_hash(payload))
+    return VerifiedCapturedProviderAuthority._from_capture(raw, _CAPTURE_AUTHORITY_ORIGIN)
 
 
 @dataclass(frozen=True)
@@ -232,31 +331,34 @@ class ProviderAuthorityDriftDiagnostic:
 
 
 def diagnose_current_provider_authority(
-    authority: CapturedProviderAuthorityEvidence,
+    authority: VerifiedCapturedProviderAuthority,
 ) -> ProviderAuthorityDriftDiagnostic:
     """Current registry is diagnostic-only; it cannot rewrite historical authority."""
 
-    lineage = CN_REALTIME_SOURCE_LINEAGE.get(authority.source_token)
+    if not isinstance(authority, VerifiedCapturedProviderAuthority):
+        raise ValueError("diagnostic requires verified captured provider authority")
+    payload = authority._verified_payload()
+    lineage = CN_REALTIME_SOURCE_LINEAGE.get(payload.source_token)
     if lineage is None:
         return ProviderAuthorityDriftDiagnostic(
             status="CURRENT_AUTHORITY_MISSING",
             differences=("source_token",),
-            recorded_authority_digest=authority.digest,
+            recorded_authority_digest=payload.digest,
         )
     differences: list[str] = []
-    if authority.market not in lineage.markets:
+    if payload.market not in lineage.markets:
         differences.append("market")
-    if lineage.adapter_id != authority.adapter_id:
+    if lineage.adapter_id != payload.adapter_id:
         differences.append("adapter_id")
-    if lineage.upstream_lineage_id != authority.upstream_lineage_id:
+    if lineage.upstream_lineage_id != payload.upstream_lineage_id:
         differences.append("upstream_lineage_id")
-    allowed = CN_INTRADAY_ENDPOINT_EXTENSIONS.get(authority.source_token, frozenset())
-    if authority.endpoint_id not in allowed:
+    allowed = CN_INTRADAY_ENDPOINT_EXTENSIONS.get(payload.source_token, frozenset())
+    if payload.endpoint_id not in allowed:
         differences.append("endpoint_id")
     return ProviderAuthorityDriftDiagnostic(
         status="CURRENT_AUTHORITY_DRIFT" if differences else "CURRENT_AUTHORITY_MATCH",
         differences=tuple(sorted(differences)),
-        recorded_authority_digest=authority.digest,
+        recorded_authority_digest=payload.digest,
     )
 
 
@@ -299,7 +401,7 @@ class ProviderRecordedMarketFixture:
     interval_label: str
     available_at: datetime
     observed_at: datetime
-    authority: CapturedProviderAuthorityEvidence
+    authority: VerifiedCapturedProviderAuthority
     raw_artifact_sha256: str
     capture_id: str
     observation_id: str
@@ -314,6 +416,9 @@ class ProviderRecordedMarketFixture:
     def __post_init__(self) -> None:
         if self.schema_version != PROVIDER_RECORDED_FIXTURE_SCHEMA_VERSION:
             raise ValueError(f"unsupported provider-recorded fixture: {self.schema_version}")
+        if not isinstance(self.authority, VerifiedCapturedProviderAuthority):
+            raise ValueError("fixture requires verified captured provider authority")
+        authority = self.authority._verified_payload()
         for name in ("fixture_id", "symbol", "interval_label", "capture_id", "observation_id", "normalizer_version"):
             _trimmed(getattr(self, name), name)
         available = aware_utc(self.available_at, "available_at")
@@ -330,11 +435,11 @@ class ProviderRecordedMarketFixture:
         _hex(self.fixture_digest, "fixture_digest")
         if self.normalizer_version != NORMALIZER_VERSION or self.normalizer_sha256 != NORMALIZER_SHA256:
             raise ValueError("provider-recorded fixture normalizer identity mismatch")
-        if self.raw_artifact_sha256 != self.authority.raw_artifact_sha256:
+        if self.raw_artifact_sha256 != authority.raw_artifact_sha256:
             raise ValueError("fixture raw artifact does not match captured authority")
-        if self.capture_id != self.authority.capture_id or self.observation_id != self.authority.observation_id:
+        if self.capture_id != authority.capture_id or self.observation_id != authority.observation_id:
             raise ValueError("fixture capture/observation does not match captured authority")
-        if self.observed_at != self.authority.captured_at:
+        if self.observed_at != authority.captured_at:
             raise ValueError("fixture observed_at must equal captured authority time")
 
         rows = tuple(deep_freeze(row) for row in self.rows)
@@ -373,6 +478,8 @@ class ProviderRecordedMarketFixture:
             }
             if set(lineage) != required:
                 raise ValueError("normalization lineage schema mismatch")
+            if lineage["schema_version"] != NORMALIZATION_LINEAGE_VERSION:
+                raise ValueError("normalization lineage version mismatch")
             if lineage["artifact_sha256"] != self.raw_artifact_sha256:
                 raise ValueError("normalization lineage raw artifact mismatch")
             if lineage["capture_id"] != self.capture_id or lineage["observation_id"] != self.observation_id:
@@ -402,7 +509,8 @@ class ProviderRecordedMarketFixture:
         return f"provider-recorded:{self.fixture_id}:{index}:{event_time.isoformat()}"
 
     def source_id(self) -> str:
-        return f"provider://{self.authority.market}/{self.authority.source_token}/{self.authority.endpoint_id}"
+        authority = self.authority._verified_payload()
+        return f"provider://{authority.market}/{authority.source_token}/{authority.endpoint_id}"
 
     def digest_payload(self) -> dict[str, Any]:
         return {
@@ -428,6 +536,7 @@ class ProviderRecordedMarketFixture:
         return self.authority.historical_resolver()
 
     def materialize_events(self) -> tuple[EventRecord, ...]:
+        authority = self.authority._verified_payload()
         events: list[EventRecord] = []
         for index, (row, lineage) in enumerate(zip(self.rows, self.row_lineages)):
             event_time = _parse_aware(row["datetime"], f"row[{index}].datetime")
@@ -445,7 +554,7 @@ class ProviderRecordedMarketFixture:
                     created_at=self.observed_at,
                     source_id=self.source_id(),
                     payload={
-                        "provider_authority_digest": self.authority.digest,
+                        "provider_authority_digest": authority.digest,
                         "raw_artifact_sha256": self.raw_artifact_sha256,
                         "capture_id": self.capture_id,
                         "observation_id": self.observation_id,
@@ -460,9 +569,9 @@ class ProviderRecordedMarketFixture:
                     },
                     trace_id=f"trace:provider-recorded:{self.fixture_id}",
                     source_kind="PROVIDER",
-                    source_token=self.authority.source_token,
-                    endpoint_id=self.authority.endpoint_id,
-                    market=self.authority.market,
+                    source_token=authority.source_token,
+                    endpoint_id=authority.endpoint_id,
+                    market=authority.market,
                 )
             )
         return tuple(events)
@@ -472,21 +581,24 @@ def convert_sealed_capture_to_provider_fixture(
     sealed: SealedRawCapture,
     *,
     observation_id: str,
-    authority: CapturedProviderAuthorityEvidence,
+    authority: VerifiedCapturedProviderAuthority,
     fixture_id: str,
 ) -> ProviderRecordedMarketFixture:
     """Pure deterministic A4b conversion for already-canonical aware OHLCV rows."""
 
     if not isinstance(sealed, SealedRawCapture):
         raise ValueError("provider fixture conversion requires verified SealedRawCapture")
+    if not isinstance(authority, VerifiedCapturedProviderAuthority):
+        raise ValueError("provider fixture conversion requires verified captured provider authority")
+    authority_payload = authority._verified_payload()
     artifact = sealed.artifact
     available_at, observed_at = sealed.pit_binding(observation_id)
     observation = artifact.observation(observation_id)
-    if authority.raw_artifact_sha256 != sealed.manifest.artifact_sha256:
+    if authority_payload.raw_artifact_sha256 != sealed.manifest.artifact_sha256:
         raise ValueError("captured authority is bound to a different raw artifact")
-    if authority.capture_id != artifact.capture_id or authority.observation_id != observation_id:
+    if authority_payload.capture_id != artifact.capture_id or authority_payload.observation_id != observation_id:
         raise ValueError("captured authority is bound to a different capture/observation")
-    if authority.captured_at != observed_at:
+    if authority_payload.captured_at != observed_at:
         raise ValueError("captured authority time does not match verified A4 observation")
     payload = observation.raw_payload
     if not isinstance(payload, Mapping):
@@ -537,8 +649,5 @@ def convert_sealed_capture_to_provider_fixture(
         "rows_digest": stable_hash(rows_tuple),
         "row_lineages_digest": stable_hash(lineages_tuple),
     }
-    digest_payload = {
-        **base,
-        "authority": authority.canonical_payload(),
-    }
+    digest_payload = {**base, "authority": authority.canonical_payload()}
     return ProviderRecordedMarketFixture(**base, fixture_digest=stable_hash(digest_payload))
