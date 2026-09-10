@@ -1,5 +1,5 @@
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -53,6 +53,215 @@ def test_daily_qa_summarizes_without_changing_signal() -> None:
 
     assert summary["failed"] == 1
     assert signal == before
+
+
+def test_validation_queue_canonicalizes_supplied_aware_timestamps_to_utc() -> None:
+    queue = ValidationQueue()
+    plus_eight = timezone(timedelta(hours=8))
+    local_timestamp = datetime(2026, 9, 10, 0, 30, tzinfo=plus_eight)
+
+    item = queue.enqueue(
+        signal_id="s-utc",
+        signal_type="breakout",
+        signal_state="confirmed",
+        created_at=local_timestamp,
+    )
+    resolved = queue.resolve(
+        item.validation_id,
+        "passed",
+        resolved_at=local_timestamp,
+    )
+
+    assert resolved.created_at == "2026-09-09T16:30:00+00:00"
+    assert resolved.resolved_at == "2026-09-09T16:30:00+00:00"
+
+
+def test_validation_queue_rejects_naive_explicit_timestamps() -> None:
+    queue = ValidationQueue()
+    naive = datetime(2026, 9, 10, 0, 30)
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        queue.enqueue(
+            signal_id="s-naive",
+            signal_type="breakout",
+            signal_state="confirmed",
+            created_at=naive,
+        )
+
+    item = queue.enqueue(
+        signal_id="s-aware",
+        signal_type="breakout",
+        signal_state="confirmed",
+    )
+    with pytest.raises(ValueError, match="timezone-aware"):
+        queue.resolve(item.validation_id, "passed", resolved_at=naive)
+
+
+def test_validation_queue_rejects_falsy_non_datetime_timestamps() -> None:
+    queue = ValidationQueue()
+    for bad in (False, 0, ""):
+        with pytest.raises(ValueError, match="must be a datetime"):
+            queue.enqueue(
+                signal_id=f"bad-{bad!r}",
+                signal_type="breakout",
+                signal_state="confirmed",
+                created_at=bad,  # type: ignore[arg-type]
+            )
+
+    item = queue.enqueue(
+        signal_id="s-aware",
+        signal_type="breakout",
+        signal_state="confirmed",
+    )
+    for bad in (False, 0, ""):
+        with pytest.raises(ValueError, match="must be a datetime"):
+            queue.resolve(item.validation_id, "passed", resolved_at=bad)  # type: ignore[arg-type]
+
+
+def test_daily_qa_compares_legacy_offset_rows_by_instant_not_iso_text() -> None:
+    queue = ValidationQueue()
+    connection = queue._connection
+    rows = (
+        (
+            "legacy-before",
+            "legacy-before",
+            "breakout",
+            "confirmed",
+            "passed",
+            "{}",
+            "2026-09-09T23:59:59+08:00",
+            None,
+        ),
+        (
+            "legacy-inside",
+            "legacy-inside",
+            "breakout",
+            "confirmed",
+            "passed",
+            "{}",
+            "2026-09-10T00:00:01+08:00",
+            None,
+        ),
+        (
+            "legacy-next-boundary",
+            "legacy-next-boundary",
+            "breakout",
+            "confirmed",
+            "passed",
+            "{}",
+            "2026-09-11T00:00:00+08:00",
+            None,
+        ),
+    )
+    connection.executemany(
+        """
+        INSERT INTO stock_radar_validation_queue
+            (validation_id, signal_id, signal_type, signal_state, outcome,
+             evidence_json, created_at, resolved_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        rows,
+    )
+    connection.commit()
+
+    summary = DailyQA(queue).summarize(
+        "breakout",
+        day=date(2026, 9, 10),
+        timezone_name="Asia/Shanghai",
+    )
+
+    assert summary["total"] == 1
+    assert summary["passed"] == 1
+
+
+def test_daily_qa_rejects_ambiguous_legacy_naive_timestamp() -> None:
+    queue = ValidationQueue()
+    queue._connection.execute(
+        """
+        INSERT INTO stock_radar_validation_queue
+            (validation_id, signal_id, signal_type, signal_state, outcome,
+             evidence_json, created_at, resolved_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "legacy-naive",
+            "legacy-naive",
+            "breakout",
+            "confirmed",
+            "passed",
+            "{}",
+            "2026-09-10T00:30:00",
+            None,
+        ),
+    )
+    queue._connection.commit()
+
+    with pytest.raises(ValueError, match="ambiguous legacy timestamps"):
+        DailyQA(queue).summarize(
+            "breakout",
+            day=date(2026, 9, 10),
+            timezone_name="Asia/Shanghai",
+        )
+
+
+def test_daily_qa_rejects_python_valid_sqlite_unparseable_legacy_timestamp() -> None:
+    queue = ValidationQueue()
+    queue._connection.execute(
+        """
+        INSERT INTO stock_radar_validation_queue
+            (validation_id, signal_id, signal_type, signal_state, outcome,
+             evidence_json, created_at, resolved_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "legacy-offset-seconds",
+            "legacy-offset-seconds",
+            "breakout",
+            "confirmed",
+            "passed",
+            "{}",
+            "2026-09-10T00:00:00+05:30:30",
+            None,
+        ),
+    )
+    queue._connection.commit()
+
+    with pytest.raises(ValueError, match="ambiguous legacy timestamps"):
+        DailyQA(queue).summarize(
+            "breakout",
+            day=date(2026, 9, 10),
+            timezone_name="Asia/Shanghai",
+        )
+
+
+def test_daily_qa_rejects_unparseable_legacy_timestamp() -> None:
+    queue = ValidationQueue()
+    queue._connection.execute(
+        """
+        INSERT INTO stock_radar_validation_queue
+            (validation_id, signal_id, signal_type, signal_state, outcome,
+             evidence_json, created_at, resolved_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "legacy-bad",
+            "legacy-bad",
+            "breakout",
+            "confirmed",
+            "passed",
+            "{}",
+            "not-a-timestamp",
+            None,
+        ),
+    )
+    queue._connection.commit()
+
+    with pytest.raises(ValueError, match="ambiguous legacy timestamps"):
+        DailyQA(queue).summarize(
+            "breakout",
+            day=date(2026, 9, 10),
+            timezone_name="Asia/Shanghai",
+        )
 
 
 def test_seven_failures_in_last_ten_trigger_qa_alert_and_review() -> None:
