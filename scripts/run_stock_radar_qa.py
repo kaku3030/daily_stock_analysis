@@ -95,6 +95,23 @@ def _weekly_markdown(rows: list[dict[str, Any]], day: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _current_in_reporting_timezone(now: datetime | None, timezone_name: str) -> datetime:
+    zone = ZoneInfo(timezone_name)
+    if now is None:
+        return datetime.now(zone)
+    if not isinstance(now, datetime):
+        raise ValueError("now must be a datetime")
+    if now.tzinfo is None:
+        raise ValueError("now must be timezone-aware")
+    try:
+        offset = now.utcoffset()
+    except Exception as exc:  # pragma: no cover - defensive broken tzinfo
+        raise ValueError("now has an unusable timezone offset") from exc
+    if offset is None:
+        raise ValueError("now must have a usable timezone offset")
+    return now.astimezone(zone)
+
+
 def run(
     action: str,
     *,
@@ -103,7 +120,7 @@ def run(
     notification_sink: Any | None = None,
 ) -> dict[str, Any]:
     timezone_name = os.getenv("STOCK_RADAR_TIMEZONE", "Asia/Shanghai")
-    current = now or datetime.now(ZoneInfo(timezone_name))
+    current = _current_in_reporting_timezone(now, timezone_name)
     database = Path(os.getenv("DATABASE_PATH", "data/stock_analysis.db"))
     output_dir = Path(os.getenv("STOCK_RADAR_QA_OUTPUT_DIR", "reports/screening"))
     database.parent.mkdir(parents=True, exist_ok=True)
@@ -130,7 +147,11 @@ def run(
 
     if run_daily:
         daily_rows = [
-            DailyQA(queue).summarize(signal_type, day=current.date())
+            DailyQA(queue).summarize(
+                signal_type,
+                day=current.date(),
+                timezone_name=timezone_name,
+            )
             for signal_type in signal_types
         ]
         result["daily"] = daily_rows
