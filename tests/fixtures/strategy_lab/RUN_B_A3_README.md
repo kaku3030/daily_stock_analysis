@@ -1,0 +1,1 @@
+Run B A3 recorded-fixture evidence is test/data infrastructure only. The canonical fixture binds capture-time authority and immutable source/license provenance; replay may diagnose current-registry drift but must not rewrite historical authority. No trading or live authority is implied.
