@@ -19,6 +19,7 @@ from src.services.strategy_lab.replay_contract import (
     EventRecord,
     InMemoryEventStore,
     SourceAuthorityResolution,
+    stable_hash,
 )
 
 UTC = timezone.utc
@@ -37,6 +38,23 @@ FIXTURE_DIGEST = "e7257f91405a0122fdd1da2cb628350c9b0bcbf203aa655cea96b9abfa9654
 
 def raw_fixture():
     return json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+
+
+def _rehash_authority(payload):
+    authority = payload["authority"]
+    authority["digest"] = stable_hash({key: value for key, value in authority.items() if key != "digest"})
+
+
+def _rehash_fixture(payload):
+    payload["rows_digest"] = stable_hash(payload["rows"])
+    payload["fixture_digest"] = stable_hash(
+        {key: value for key, value in payload.items() if key != "fixture_digest"}
+    )
+
+
+def _rehash_all(payload):
+    _rehash_authority(payload)
+    _rehash_fixture(payload)
 
 
 def current_match(source_token, endpoint_id, market):
@@ -140,7 +158,11 @@ def test_tampered_embedded_authority_with_stale_digest_fails_loud():
 def test_wrong_historical_source_endpoint_binding_fails_closed():
     fixture = load_recorded_fixture(FIXTURE_PATH)
     resolver = fixture.historical_authority_resolver()
-    assert resolver(fixture.authority.source_token, "github.contents:OTHER.csv", fixture.authority.market) is None
+    assert resolver(
+        fixture.authority.source_token,
+        "github.contents:OTHER.csv",
+        fixture.authority.market,
+    ) is None
 
 
 def test_available_at_after_observed_at_fails_closed():
@@ -160,7 +182,7 @@ def test_naive_observed_at_fails_closed():
 def test_row_tamper_with_stale_rows_digest_fails_loud():
     payload = raw_fixture()
     payload["rows"][0]["close"] = "999.0"
-    with pytest.raises(ValueError, match="rows digest mismatch"):
+    with pytest.raises(ValueError, match="invalid OHLC envelope|rows digest mismatch"):
         RecordedMarketFixture.from_mapping(payload)
 
 
@@ -245,12 +267,90 @@ def test_derived_pattern_lineage_reaches_capture_time_authority_binding():
         market=authority.market,
         trace_id=f"trace:recorded-fixture:{fixture.fixture_id}",
     )
-    engine = ReplayBaselineEngine(source_authority_resolver=fixture.historical_authority_resolver())
+    engine = ReplayBaselineEngine(
+        source_authority_resolver=fixture.historical_authority_resolver()
+    )
     assert engine.ingest(provider_event) == "ACCEPTED"
     snapshot = engine.snapshot(observed)
     assert len(snapshot.pattern_instances) == 1
-    derived = next(item for item in engine.store.events if item.source_kind == "ENGINE_DERIVED")
-    raw = next(item for item in engine.store.events if item.event_id == provider_event.event_id)
+    derived = next(
+        item for item in engine.store.events if item.source_kind == "ENGINE_DERIVED"
+    )
+    raw = next(
+        item for item in engine.store.events if item.event_id == provider_event.event_id
+    )
     assert derived.parent_event_ids == (provider_event.event_id,)
     assert raw.source_authority_ref.endswith(f"#sha256:{AUTHORITY_DIGEST}")
     assert snapshot.pattern_instances[0].payload["entry_gate"] == "CLOSED"
+
+
+def test_future_dated_recorded_row_fails_even_with_fresh_digests():
+    payload = raw_fixture()
+    payload["rows"][-1]["datetime"] = "2026-09-11T12:00:00+00:00"
+    _rehash_fixture(payload)
+    with pytest.raises(ValueError, match="row datetime cannot be after available_at"):
+        RecordedMarketFixture.from_mapping(payload)
+
+
+def test_embedded_authority_must_be_co_captured_with_observation():
+    payload = raw_fixture()
+    payload["authority"]["captured_at"] = "2026-09-10T09:35:32.000000Z"
+    _rehash_all(payload)
+    with pytest.raises(ValueError, match="captured_at must equal observed_at"):
+        RecordedMarketFixture.from_mapping(payload)
+
+
+def test_missing_bar_timestamp_semantics_fails_closed_instead_of_defaulting():
+    payload = raw_fixture()
+    del payload["time_semantics"]["bar_timestamp_semantic"]
+    _rehash_fixture(payload)
+    with pytest.raises(ValueError, match="time_semantics schema mismatch"):
+        RecordedMarketFixture.from_mapping(payload)
+
+
+def test_semantic_inflation_session_claim_fails_closed_with_fresh_digest():
+    payload = raw_fixture()
+    payload["time_semantics"]["session_semantics_claimed"] = True
+    _rehash_fixture(payload)
+    with pytest.raises(ValueError, match="must not claim session semantics"):
+        RecordedMarketFixture.from_mapping(payload)
+
+
+def test_source_commit_time_after_capture_availability_fails_closed():
+    payload = raw_fixture()
+    payload["time_semantics"]["source_commit_time"] = "2026-09-10T09:35:34.000000Z"
+    _rehash_fixture(payload)
+    with pytest.raises(ValueError, match="source_commit_time cannot be after available_at"):
+        RecordedMarketFixture.from_mapping(payload)
+
+
+def test_duplicate_or_reordered_bar_time_fails_even_with_fresh_digests():
+    payload = raw_fixture()
+    payload["rows"][1]["datetime"] = payload["rows"][0]["datetime"]
+    _rehash_fixture(payload)
+    with pytest.raises(ValueError, match="strictly increasing and unique"):
+        RecordedMarketFixture.from_mapping(payload)
+
+
+def test_invalid_ohlc_envelope_fails_even_with_fresh_digests():
+    payload = raw_fixture()
+    payload["rows"][0]["high"] = "200.0"
+    _rehash_fixture(payload)
+    with pytest.raises(ValueError, match="invalid OHLC envelope"):
+        RecordedMarketFixture.from_mapping(payload)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("ref", "0" * 40, "query ref must equal pinned authority source commit"),
+        ("path", "OTHER.csv", "authority endpoint_id does not match query path"),
+        ("lines", "99-100", "query lines do not match recorded source-slice lines"),
+    ],
+)
+def test_cross_field_provenance_mismatch_fails_even_with_fresh_digest(field, value, message):
+    payload = raw_fixture()
+    payload["query_params"][field] = value
+    _rehash_fixture(payload)
+    with pytest.raises(ValueError, match=message):
+        RecordedMarketFixture.from_mapping(payload)
