@@ -125,6 +125,7 @@ jobs:
             tests/test_strategy_lab_recorded_fixtures_a3_provenance.py \
             tests/test_strategy_lab_raw_capture_a4.py \
             tests/test_strategy_lab_raw_capture_integrity_a4.py \
+            tests/test_strategy_lab_provider_recorded_fixture_a4b.py \
             tests/test_run_stock_radar_qa.py \
             tests/test_run_stock_radar_technical_state.py
 
