@@ -10,16 +10,16 @@ from src.services.a_share_provider_lineage import RealtimeSourceLineage
 from src.services.strategy_lab.provider_recorded_fixture import (
     A0_AUTHORITY_SOURCE_REF,
     A1_AUTHORITY_SOURCE_REF,
-    CAPTURED_PROVIDER_AUTHORITY_SCHEMA_VERSION,
-    CapturedProviderAuthorityEvidence,
     NORMALIZER_SHA256,
     NORMALIZER_VERSION,
     PROVIDER_RECORDED_FIXTURE_SCHEMA_VERSION,
+    VerifiedCapturedProviderAuthority,
     capture_current_a_share_provider_authority,
     convert_sealed_capture_to_provider_fixture,
     diagnose_current_provider_authority,
 )
 from src.services.strategy_lab.raw_capture import (
+    NORMALIZATION_LINEAGE_VERSION,
     RAW_CAPTURE_MANIFEST_VERSION,
     encode_raw_capture,
     load_sealed_raw_capture,
@@ -110,26 +110,6 @@ def capture_authority(sealed):
     )
 
 
-def manual_authority(sealed, *, observation_id="history-cn-15m-1", captured_at=None):
-    artifact = sealed.artifact
-    captured_at = captured_at or artifact.observation(observation_id).parent_observed_at
-    payload = {
-        "schema_version": CAPTURED_PROVIDER_AUTHORITY_SCHEMA_VERSION,
-        "source_token": "akshare_em",
-        "endpoint_id": "akshare.eastmoney_intraday",
-        "market": "cn",
-        "adapter_id": "akshare",
-        "upstream_lineage_id": "eastmoney",
-        "captured_at": captured_at,
-        "raw_artifact_sha256": sealed.manifest.artifact_sha256,
-        "capture_id": artifact.capture_id,
-        "observation_id": observation_id,
-        "a0_authority_source_ref": A0_AUTHORITY_SOURCE_REF,
-        "a1_authority_source_ref": A1_AUTHORITY_SOURCE_REF,
-    }
-    return CapturedProviderAuthorityEvidence(**payload, digest=stable_hash(payload))
-
-
 def make_fixture(tmp_path):
     sealed = write_sealed(tmp_path)
     authority = capture_authority(sealed)
@@ -160,6 +140,24 @@ def test_valid_verified_capture_converts_with_one_to_one_lineage(tmp_path):
     assert fixture.normalizer_sha256 == NORMALIZER_SHA256
     assert fixture.rows[0]["datetime"] == "2026-09-09T01:45:00.000000Z"
     assert fixture.row_lineages[1]["raw_path"].endswith("raw_rows[1]")
+    assert all(item["schema_version"] == NORMALIZATION_LINEAGE_VERSION for item in fixture.row_lineages)
+
+
+def test_verified_authority_cannot_be_constructed_directly():
+    with pytest.raises(TypeError, match="capture-time factory"):
+        VerifiedCapturedProviderAuthority()
+
+
+def test_uninitialized_verified_authority_object_is_rejected_before_use(tmp_path):
+    sealed = write_sealed(tmp_path)
+    fake = object.__new__(VerifiedCapturedProviderAuthority)
+    with pytest.raises(ValueError, match="not verified"):
+        convert_sealed_capture_to_provider_fixture(
+            sealed,
+            observation_id="history-cn-15m-1",
+            authority=fake,
+            fixture_id="uninitialized-authority",
+        )
 
 
 def test_unverified_or_wrong_type_cannot_convert(tmp_path):
@@ -179,7 +177,20 @@ def test_capture_time_authority_is_digest_bound_to_raw_artifact(tmp_path):
     assert authority.captured_at == datetime(2026, 9, 10, 10, 0, 2, tzinfo=UTC)
     assert authority.a0_authority_source_ref == A0_AUTHORITY_SOURCE_REF
     assert authority.a1_authority_source_ref == A1_AUTHORITY_SOURCE_REF
-    assert authority.digest == stable_hash(authority.digest_payload())
+    canonical = authority.canonical_payload()
+    assert canonical["digest"] == stable_hash({k: v for k, v in canonical.items() if k != "digest"})
+
+
+def test_internal_authority_payload_tamper_is_revalidated_before_conversion(tmp_path):
+    sealed, authority, _ = make_fixture(tmp_path)
+    object.__setattr__(authority._payload, "source_token", "forged")
+    with pytest.raises(ValueError, match="digest mismatch"):
+        convert_sealed_capture_to_provider_fixture(
+            sealed,
+            observation_id="history-cn-15m-1",
+            authority=authority,
+            fixture_id="tampered-authority",
+        )
 
 
 def test_wrong_source_endpoint_cannot_be_captured_as_a1_authority(tmp_path):
@@ -229,12 +240,10 @@ def test_current_authority_drift_is_diagnostic_only(monkeypatch, tmp_path):
 
 
 def test_authority_bound_to_different_raw_artifact_fails_closed(tmp_path_factory):
-    first_dir = tmp_path_factory.mktemp("first")
-    second_dir = tmp_path_factory.mktemp("second")
-    first = write_sealed(first_dir)
+    first = write_sealed(tmp_path_factory.mktemp("first"))
     payload = artifact_payload()
     payload["capture_id"] = "capture-akshare-em-aware-002"
-    second = write_sealed(second_dir, payload)
+    second = write_sealed(tmp_path_factory.mktemp("second"), payload)
     authority = capture_authority(first)
     with pytest.raises(ValueError, match="different raw artifact"):
         convert_sealed_capture_to_provider_fixture(
@@ -242,21 +251,6 @@ def test_authority_bound_to_different_raw_artifact_fails_closed(tmp_path_factory
             observation_id="history-cn-15m-1",
             authority=authority,
             fixture_id="cross-bound",
-        )
-
-
-def test_authority_time_mismatch_fails_closed(tmp_path):
-    sealed = write_sealed(tmp_path)
-    authority = manual_authority(
-        sealed,
-        captured_at=datetime(2026, 9, 10, 10, 0, 3, tzinfo=UTC),
-    )
-    with pytest.raises(ValueError, match="authority time"):
-        convert_sealed_capture_to_provider_fixture(
-            sealed,
-            observation_id="history-cn-15m-1",
-            authority=authority,
-            fixture_id="time-mismatch",
         )
 
 
@@ -300,9 +294,12 @@ def test_empty_raw_rows_cannot_become_provider_recorded_fixture(tmp_path):
         )
 
 
-def test_timeout_or_non_pit_observation_cannot_convert(tmp_path):
-    sealed = write_sealed(tmp_path, artifact_payload(status="TIMEOUT", response=None))
-    authority = manual_authority(sealed)
+def test_timeout_or_non_pit_observation_cannot_convert(tmp_path_factory):
+    authority = capture_authority(write_sealed(tmp_path_factory.mktemp("authority")))
+    sealed = write_sealed(
+        tmp_path_factory.mktemp("timeout"),
+        artifact_payload(status="TIMEOUT", response=None),
+    )
     with pytest.raises(ValueError, match="not eligible for point-in-time"):
         convert_sealed_capture_to_provider_fixture(
             sealed,
@@ -312,12 +309,12 @@ def test_timeout_or_non_pit_observation_cannot_convert(tmp_path):
         )
 
 
-def test_serialization_diagnostic_blocks_conversion(tmp_path):
+def test_serialization_diagnostic_blocks_conversion(tmp_path_factory):
+    authority = capture_authority(write_sealed(tmp_path_factory.mktemp("authority")))
     sealed = write_sealed(
-        tmp_path,
+        tmp_path_factory.mktemp("diagnostic"),
         artifact_payload(diagnostics=["upstream coercion observed"]),
     )
-    authority = manual_authority(sealed)
     with pytest.raises(ValueError, match="not eligible for point-in-time"):
         convert_sealed_capture_to_provider_fixture(
             sealed,
@@ -353,6 +350,16 @@ def test_stale_tampered_lineage_digest_fails_closed(tmp_path):
     first["lineage_digest"] = "0" * 64
     tampered = (first, *fixture.row_lineages[1:])
     with pytest.raises(ValueError, match="normalization lineage digest mismatch"):
+        replace(fixture, row_lineages=tampered)
+
+
+def test_unknown_lineage_schema_cannot_be_rehashed_into_acceptance(tmp_path):
+    _, _, fixture = make_fixture(tmp_path)
+    first = dict(fixture.row_lineages[0])
+    first["schema_version"] = "raw-normalization-lineage-v999"
+    first["lineage_digest"] = stable_hash({k: v for k, v in first.items() if k != "lineage_digest"})
+    tampered = (first, *fixture.row_lineages[1:])
+    with pytest.raises(ValueError, match="lineage version mismatch"):
         replace(fixture, row_lineages=tampered)
 
 
