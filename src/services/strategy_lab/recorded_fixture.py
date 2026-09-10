@@ -30,6 +30,9 @@ FIXTURE_SCHEMA_VERSION = "recorded-market-fixture-v0.1"
 AUTHORITY_MODE_EMBEDDED = "EMBEDDED"
 REPRESENTATION_NORMALIZED_LICENSED_CSV = "NORMALIZED_FROM_LICENSED_PUBLIC_CSV"
 
+BAR_TIMESTAMP_SOURCE_DECLARED = "SOURCE_DECLARED_DATETIME_ONLY"
+AVAILABILITY_CONSERVATIVE_CAPTURE_SEAL = "CONSERVATIVE_CAPTURE_SEAL"
+
 AUTHORITY_DRIFT_NOT_CHECKED = "CURRENT_AUTHORITY_NOT_CHECKED"
 AUTHORITY_DRIFT_MATCH = "CURRENT_AUTHORITY_MATCH"
 AUTHORITY_DRIFT_MISSING = "CURRENT_AUTHORITY_MISSING"
@@ -56,7 +59,6 @@ _AUTHORITY_KEYS = frozenset(
         "digest",
     }
 )
-
 _FIXTURE_KEYS = frozenset(
     {
         "schema_version",
@@ -76,7 +78,16 @@ _FIXTURE_KEYS = frozenset(
         "fixture_digest",
     }
 )
-
+_QUERY_PARAM_KEYS = frozenset({"repository", "path", "ref", "lines"})
+_TIME_SEMANTIC_KEYS = frozenset(
+    {
+        "bar_timestamp_semantic",
+        "availability_semantic",
+        "session_semantics_claimed",
+        "source_commit_time",
+        "raw_source_slice_lines",
+    }
+)
 _ROW_KEYS = frozenset({"datetime", "open", "high", "low", "close", "volume"})
 
 
@@ -94,15 +105,22 @@ def _non_empty_trimmed(value: Any, name: str) -> str:
     return value
 
 
+def _aware_required(value: Any, name: str) -> datetime:
+    if not isinstance(value, datetime):
+        raise ValueError(f"{name} must be a timezone-aware datetime")
+    result = aware_utc(value, name)
+    if result is None:
+        raise ValueError(f"{name} must be a timezone-aware datetime")
+    return result
+
+
 def _parse_aware(value: Any, name: str) -> datetime:
     raw = _non_empty_trimmed(value, name)
     try:
         parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError as exc:
         raise ValueError(f"{name} must be ISO-8601 datetime") from exc
-    result = aware_utc(parsed, name)
-    assert result is not None
-    return result
+    return _aware_required(parsed, name)
 
 
 def _hex_sha(value: Any, name: str, length: int) -> str:
@@ -112,7 +130,7 @@ def _hex_sha(value: Any, name: str, length: int) -> str:
     return text
 
 
-def _validate_numeric_text(value: Any, name: str, *, allow_zero: bool = True) -> str:
+def _decimal_text(value: Any, name: str, *, allow_zero: bool = True) -> Decimal:
     text = _non_empty_trimmed(value, name)
     try:
         number = Decimal(text)
@@ -122,7 +140,7 @@ def _validate_numeric_text(value: Any, name: str, *, allow_zero: bool = True) ->
         raise ValueError(f"{name} must be finite decimal text")
     if number < 0 or (not allow_zero and number == 0):
         raise ValueError(f"{name} out of allowed range")
-    return text
+    return number
 
 
 @dataclass(frozen=True)
@@ -163,13 +181,13 @@ class RecordedAuthoritySnapshot:
             "license_ref",
         ):
             _non_empty_trimmed(getattr(self, field_name), field_name)
-        object.__setattr__(self, "captured_at", aware_utc(self.captured_at, "captured_at"))
+
+        object.__setattr__(self, "captured_at", _aware_required(self.captured_at, "captured_at"))
         _hex_sha(self.source_commit_sha, "source_commit_sha", 40)
         _hex_sha(self.source_blob_sha, "source_blob_sha", 40)
         _hex_sha(self.license_blob_sha, "license_blob_sha", 40)
         _hex_sha(self.digest, "authority.digest", 64)
-        expected = stable_hash(self.digest_payload())
-        if self.digest != expected:
+        if self.digest != stable_hash(self.digest_payload()):
             raise ValueError("recorded authority digest mismatch")
 
     def digest_payload(self) -> dict[str, Any]:
@@ -258,34 +276,111 @@ class RecordedMarketFixture:
             _non_empty_trimmed(getattr(self, field_name), field_name)
         if self.representation != REPRESENTATION_NORMALIZED_LICENSED_CSV:
             raise ValueError("unsupported recorded fixture representation")
-        object.__setattr__(self, "available_at", aware_utc(self.available_at, "available_at"))
-        object.__setattr__(self, "observed_at", aware_utc(self.observed_at, "observed_at"))
+        if not isinstance(self.query_params, Mapping):
+            raise ValueError("query_params must be an object")
+        if not isinstance(self.time_semantics, Mapping):
+            raise ValueError("time_semantics must be an object")
+
+        object.__setattr__(self, "available_at", _aware_required(self.available_at, "available_at"))
+        object.__setattr__(self, "observed_at", _aware_required(self.observed_at, "observed_at"))
         if self.available_at > self.observed_at:
             raise ValueError("available_at cannot be after observed_at")
-        if self.authority.captured_at > self.observed_at:
-            raise ValueError("authority captured_at cannot be after observed_at")
+
+        # EMBEDDED mode has no independent validity interval. For A3 it therefore
+        # must be co-captured with the observation it is meant to authorize.
+        if self.authority.captured_at != self.observed_at:
+            raise ValueError("embedded authority captured_at must equal observed_at")
+
+        self._validate_representation_metadata()
 
         object.__setattr__(self, "query_params", deep_freeze(self.query_params))
         object.__setattr__(self, "time_semantics", deep_freeze(self.time_semantics))
         frozen_rows = tuple(deep_freeze(row) for row in self.rows)
         object.__setattr__(self, "rows", frozen_rows)
-        if not self.rows:
-            raise ValueError("recorded fixture rows must be non-empty")
-        for index, row in enumerate(self.rows):
-            _require_exact_keys(row, _ROW_KEYS, f"row[{index}]")
-            _parse_aware(row["datetime"], f"row[{index}].datetime")
-            for field_name in ("open", "high", "low", "close"):
-                _validate_numeric_text(row[field_name], f"row[{index}].{field_name}", allow_zero=False)
-            _validate_numeric_text(row["volume"], f"row[{index}].volume", allow_zero=True)
+        self._validate_rows()
 
         _hex_sha(self.rows_digest, "rows_digest", 64)
         _hex_sha(self.fixture_digest, "fixture_digest", 64)
-        expected_rows = stable_hash(self.rows)
-        if self.rows_digest != expected_rows:
+        if self.rows_digest != stable_hash(self.rows):
             raise ValueError("recorded rows digest mismatch")
-        expected_fixture = stable_hash(self.digest_payload())
-        if self.fixture_digest != expected_fixture:
+        if self.fixture_digest != stable_hash(self.digest_payload()):
             raise ValueError("recorded fixture digest mismatch")
+
+    def _validate_representation_metadata(self) -> None:
+        _require_exact_keys(self.query_params, _QUERY_PARAM_KEYS, "query_params")
+        _require_exact_keys(self.time_semantics, _TIME_SEMANTIC_KEYS, "time_semantics")
+
+        for key in ("repository", "path", "ref", "lines"):
+            _non_empty_trimmed(self.query_params[key], f"query_params.{key}")
+        _non_empty_trimmed(
+            self.time_semantics["bar_timestamp_semantic"],
+            "time_semantics.bar_timestamp_semantic",
+        )
+        _non_empty_trimmed(
+            self.time_semantics["availability_semantic"],
+            "time_semantics.availability_semantic",
+        )
+        _non_empty_trimmed(
+            self.time_semantics["raw_source_slice_lines"],
+            "time_semantics.raw_source_slice_lines",
+        )
+
+        if self.time_semantics["bar_timestamp_semantic"] != BAR_TIMESTAMP_SOURCE_DECLARED:
+            raise ValueError("unsupported bar timestamp semantic")
+        if (
+            self.time_semantics["availability_semantic"]
+            != AVAILABILITY_CONSERVATIVE_CAPTURE_SEAL
+        ):
+            raise ValueError("unsupported availability semantic")
+        if self.time_semantics["session_semantics_claimed"] is not False:
+            raise ValueError("A3 fixture must not claim session semantics")
+
+        source_commit_time = _parse_aware(
+            self.time_semantics["source_commit_time"],
+            "time_semantics.source_commit_time",
+        )
+        if source_commit_time > self.available_at:
+            raise ValueError("source_commit_time cannot be after available_at")
+        if self.query_params["ref"] != self.authority.source_commit_sha:
+            raise ValueError("query ref must equal pinned authority source commit")
+        expected_endpoint = f"github.contents:{self.query_params['path']}"
+        if self.authority.endpoint_id != expected_endpoint:
+            raise ValueError("authority endpoint_id does not match query path")
+        if self.query_params["lines"] != self.time_semantics["raw_source_slice_lines"]:
+            raise ValueError("query lines do not match recorded source-slice lines")
+        if self.authority.source_commit_sha not in self.authority.authority_ref:
+            raise ValueError("authority_ref does not bind pinned source commit")
+        if self.authority.source_commit_sha not in self.authority.evidence_ref:
+            raise ValueError("evidence_ref does not bind pinned source commit")
+        if self.authority.source_commit_sha not in self.authority.license_ref:
+            raise ValueError("license_ref does not bind pinned source commit")
+
+    def _validate_rows(self) -> None:
+        if not self.rows:
+            raise ValueError("recorded fixture rows must be non-empty")
+
+        previous_time: datetime | None = None
+        for index, row in enumerate(self.rows):
+            if not isinstance(row, Mapping):
+                raise ValueError(f"row[{index}] must be an object")
+            _require_exact_keys(row, _ROW_KEYS, f"row[{index}]")
+            event_time = _parse_aware(row["datetime"], f"row[{index}].datetime")
+            if event_time > self.available_at:
+                raise ValueError("recorded row datetime cannot be after available_at")
+            if previous_time is not None and event_time <= previous_time:
+                raise ValueError("recorded row datetimes must be strictly increasing and unique")
+            previous_time = event_time
+
+            open_px = _decimal_text(row["open"], f"row[{index}].open", allow_zero=False)
+            high_px = _decimal_text(row["high"], f"row[{index}].high", allow_zero=False)
+            low_px = _decimal_text(row["low"], f"row[{index}].low", allow_zero=False)
+            close_px = _decimal_text(row["close"], f"row[{index}].close", allow_zero=False)
+            _decimal_text(row["volume"], f"row[{index}].volume", allow_zero=True)
+
+            if high_px < low_px or high_px < open_px or high_px < close_px:
+                raise ValueError(f"row[{index}] invalid OHLC envelope")
+            if low_px > open_px or low_px > close_px:
+                raise ValueError(f"row[{index}] invalid OHLC envelope")
 
     def digest_payload(self) -> dict[str, Any]:
         return {
@@ -311,9 +406,9 @@ class RecordedMarketFixture:
             raise ValueError("recorded fixture requires capture-time authority")
         _require_exact_keys(payload, _FIXTURE_KEYS, "fixture")
         authority_payload = payload.get("authority")
+        rows_payload = payload.get("rows")
         if not isinstance(authority_payload, Mapping):
             raise ValueError("recorded fixture requires capture-time authority")
-        rows_payload = payload.get("rows")
         if not isinstance(rows_payload, list):
             raise ValueError("recorded fixture rows must be a list")
         return cls(
@@ -337,7 +432,11 @@ class RecordedMarketFixture:
     def historical_authority_resolver(self) -> SourceAuthorityResolver:
         authority = self.authority
 
-        def resolve(source_token: str, endpoint_id: str, market: str) -> SourceAuthorityResolution | None:
+        def resolve(
+            source_token: str,
+            endpoint_id: str,
+            market: str,
+        ) -> SourceAuthorityResolution | None:
             if (
                 source_token != authority.source_token
                 or endpoint_id != authority.endpoint_id
@@ -356,9 +455,9 @@ class RecordedMarketFixture:
         return resolve
 
     def materialize_events(self) -> tuple[EventRecord, ...]:
-        events: list[EventRecord] = []
         authority = self.authority
-        timestamp_semantic = self.time_semantics.get("bar_timestamp_semantic", "SOURCE_DECLARED")
+        timestamp_semantic = self.time_semantics["bar_timestamp_semantic"]
+        events: list[EventRecord] = []
         for index, row in enumerate(self.rows):
             event_time = _parse_aware(row["datetime"], f"row[{index}].datetime")
             events.append(
@@ -436,6 +535,7 @@ def diagnose_current_authority(
             current_authority_ref=None,
             differences=(),
         )
+
     current = current_resolver(authority.source_token, authority.endpoint_id, authority.market)
     if current is None:
         return AuthorityDriftDiagnostic(
@@ -444,6 +544,7 @@ def diagnose_current_authority(
             current_authority_ref=None,
             differences=("current_authority_missing",),
         )
+
     differences = tuple(
         name
         for name, recorded, live in (
@@ -482,7 +583,10 @@ def replay_recorded_fixture(
         replay_result=result,
         fixture_digest=fixture.fixture_digest,
         authority_digest=fixture.authority.digest,
-        authority_drift=diagnose_current_authority(fixture.authority, current_authority_resolver),
+        authority_drift=diagnose_current_authority(
+            fixture.authority,
+            current_authority_resolver,
+        ),
     )
 
 
