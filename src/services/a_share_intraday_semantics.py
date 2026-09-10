@@ -17,14 +17,34 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from enum import Enum
+from types import MappingProxyType
 from typing import Mapping
 from zoneinfo import ZoneInfo
+
+from src.services.a_share_provider_lineage import CN_REALTIME_SOURCE_LINEAGE
 
 
 CN_MARKET_TIMEZONE = "Asia/Shanghai"
 CN_TRADING_CALENDAR_ID = "CN_A_SHARE"
 CN_REGULAR_SESSION_SEGMENTS = (("09:30", "11:30"), ("13:00", "15:00"))
 _SUPPORTED_INTERVAL_MINUTES = frozenset({15, 60})
+
+
+# A1 owns only the intraday provider-surface extension. Provider/upstream
+# identity remains authoritative in PR #40 CN_REALTIME_SOURCE_LINEAGE.
+_CN_INTRADAY_ENDPOINT_EXTENSIONS_MUTABLE = {
+    "akshare_em": frozenset({"akshare.eastmoney_intraday"}),
+}
+
+for _source_token in _CN_INTRADAY_ENDPOINT_EXTENSIONS_MUTABLE:
+    if _source_token not in CN_REALTIME_SOURCE_LINEAGE:
+        raise RuntimeError(
+            "intraday endpoint extension must reference an authoritative CN realtime source"
+        )
+
+CN_INTRADAY_ENDPOINT_EXTENSIONS: Mapping[str, frozenset[str]] = MappingProxyType(
+    _CN_INTRADAY_ENDPOINT_EXTENSIONS_MUTABLE
+)
 
 
 class TimestampSemantic(str, Enum):
@@ -35,6 +55,8 @@ class TimestampSemantic(str, Enum):
 
 class ObservationReadiness(str, Enum):
     READY_FOR_DERIVED_GATES = "READY_FOR_DERIVED_GATES"
+    UNKNOWN_SOURCE_IDENTITY = "UNKNOWN_SOURCE_IDENTITY"
+    INVALID_INTRADAY_ENDPOINT_BINDING = "INVALID_INTRADAY_ENDPOINT_BINDING"
     UNKNOWN_TIMESTAMP_SEMANTIC = "UNKNOWN_TIMESTAMP_SEMANTIC"
     MISSING_PROVIDER_TIMESTAMP = "MISSING_PROVIDER_TIMESTAMP"
     NAIVE_PROVIDER_TIMESTAMP = "NAIVE_PROVIDER_TIMESTAMP"
@@ -162,6 +184,20 @@ def build_cn_intraday_identity(
     )
 
 
+def _assess_provider_identity_binding(facts: ProviderSemanticFacts) -> ObservationReadiness | None:
+    """Bind A1 provider facts to #40 identity plus the governed intraday surface."""
+
+    lineage = CN_REALTIME_SOURCE_LINEAGE.get(facts.source_token)
+    if lineage is None or "cn" not in lineage.markets:
+        return ObservationReadiness.UNKNOWN_SOURCE_IDENTITY
+
+    allowed_endpoints = CN_INTRADAY_ENDPOINT_EXTENSIONS.get(facts.source_token)
+    if allowed_endpoints is None or facts.endpoint_id not in allowed_endpoints:
+        return ObservationReadiness.INVALID_INTRADAY_ENDPOINT_BINDING
+
+    return None
+
+
 def assess_observation_readiness(
     identity: CanonicalIntradayIdentity,
     facts: ProviderSemanticFacts,
@@ -184,6 +220,10 @@ def assess_observation_readiness(
         or facts.interval_minutes != identity.interval_minutes
     ):
         return ObservationReadiness.IDENTITY_MISMATCH
+
+    provider_identity_failure = _assess_provider_identity_binding(facts)
+    if provider_identity_failure is not None:
+        return provider_identity_failure
 
     if not facts.observation_complete:
         return ObservationReadiness.PROVIDER_OBSERVATION_INCOMPLETE
