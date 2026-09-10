@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-import json
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -24,6 +23,7 @@ from .replay_contract import (
     deep_freeze,
     stable_hash,
 )
+from .strict_json import load_strict_json
 
 AUTHORITY_SCHEMA_VERSION = "recorded-authority-v0.1"
 FIXTURE_SCHEMA_VERSION = "recorded-market-fixture-v0.1"
@@ -141,6 +141,57 @@ def _decimal_text(value: Any, name: str, *, allow_zero: bool = True) -> Decimal:
     if number < 0 or (not allow_zero and number == 0):
         raise ValueError(f"{name} out of allowed range")
     return number
+
+
+def _canonical_repository(value: Any) -> str:
+    repository = _non_empty_trimmed(value, "query_params.repository")
+    parts = repository.split("/")
+    if len(parts) != 2 or any(not part for part in parts):
+        raise ValueError("query_params.repository must be canonical owner/repository")
+    allowed = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._")
+    if any(any(char not in allowed for char in part) for part in parts):
+        raise ValueError("query_params.repository contains unsupported characters")
+    if any(part in {".", ".."} for part in parts):
+        raise ValueError("query_params.repository must be canonical owner/repository")
+    return repository
+
+
+def _canonical_repo_path(value: Any, name: str) -> str:
+    path = _non_empty_trimmed(value, name)
+    if path.startswith("/") or "\\" in path or "?" in path or "#" in path:
+        raise ValueError(f"{name} must be a canonical relative repository path")
+    if any(char.isspace() or ord(char) < 32 for char in path):
+        raise ValueError(f"{name} must be a canonical relative repository path")
+    segments = path.split("/")
+    if any(segment in {"", ".", ".."} for segment in segments):
+        raise ValueError(f"{name} must be a canonical relative repository path")
+    return path
+
+
+def _canonical_line_range(value: Any, name: str) -> tuple[str, int, int]:
+    text = _non_empty_trimmed(value, name)
+    parts = text.split("-")
+    if len(parts) != 2 or not all(part.isdigit() for part in parts):
+        raise ValueError(f"{name} must be canonical positive N-M")
+    start, end = (int(part) for part in parts)
+    if start <= 0 or end <= 0 or start > end:
+        raise ValueError(f"{name} must be canonical positive N-M")
+    if parts[0] != str(start) or parts[1] != str(end):
+        raise ValueError(f"{name} must be canonical positive N-M")
+    return text, start, end
+
+
+def _canonical_source_query(repository: str, path: str, ref: str, start: int, end: int) -> str:
+    return f"github://{repository}/{path}?ref={ref}#L{start}-L{end}"
+
+
+def _validate_license_ref(value: str, repository: str, ref: str) -> None:
+    prefix = f"{repository}:"
+    suffix = f"@{ref}"
+    if not value.startswith(prefix) or not value.endswith(suffix):
+        raise ValueError("license_ref does not bind canonical repository and commit")
+    license_path = value[len(prefix) : -len(suffix)]
+    _canonical_repo_path(license_path, "authority.license_ref path")
 
 
 @dataclass(frozen=True)
@@ -310,8 +361,19 @@ class RecordedMarketFixture:
         _require_exact_keys(self.query_params, _QUERY_PARAM_KEYS, "query_params")
         _require_exact_keys(self.time_semantics, _TIME_SEMANTIC_KEYS, "time_semantics")
 
-        for key in ("repository", "path", "ref", "lines"):
-            _non_empty_trimmed(self.query_params[key], f"query_params.{key}")
+        repository = _canonical_repository(self.query_params["repository"])
+        path = _canonical_repo_path(self.query_params["path"], "query_params.path")
+        ref = _hex_sha(self.query_params["ref"], "query_params.ref", 40)
+        lines, line_start, line_end = _canonical_line_range(
+            self.query_params["lines"], "query_params.lines"
+        )
+        semantic_lines, _, _ = _canonical_line_range(
+            self.time_semantics["raw_source_slice_lines"],
+            "time_semantics.raw_source_slice_lines",
+        )
+        if semantic_lines != lines:
+            raise ValueError("query lines do not match recorded source-slice lines")
+
         _non_empty_trimmed(
             self.time_semantics["bar_timestamp_semantic"],
             "time_semantics.bar_timestamp_semantic",
@@ -320,11 +382,6 @@ class RecordedMarketFixture:
             self.time_semantics["availability_semantic"],
             "time_semantics.availability_semantic",
         )
-        _non_empty_trimmed(
-            self.time_semantics["raw_source_slice_lines"],
-            "time_semantics.raw_source_slice_lines",
-        )
-
         if self.time_semantics["bar_timestamp_semantic"] != BAR_TIMESTAMP_SOURCE_DECLARED:
             raise ValueError("unsupported bar timestamp semantic")
         if (
@@ -341,19 +398,36 @@ class RecordedMarketFixture:
         )
         if source_commit_time > self.available_at:
             raise ValueError("source_commit_time cannot be after available_at")
-        if self.query_params["ref"] != self.authority.source_commit_sha:
+        if ref != self.authority.source_commit_sha:
             raise ValueError("query ref must equal pinned authority source commit")
-        expected_endpoint = f"github.contents:{self.query_params['path']}"
+
+        expected_source_query = _canonical_source_query(
+            repository, path, ref, line_start, line_end
+        )
+        if self.source_query != expected_source_query:
+            raise ValueError("source_query does not match canonical source tuple")
+
+        expected_endpoint = f"github.contents:{path}"
         if self.authority.endpoint_id != expected_endpoint:
             raise ValueError("authority endpoint_id does not match query path")
-        if self.query_params["lines"] != self.time_semantics["raw_source_slice_lines"]:
-            raise ValueError("query lines do not match recorded source-slice lines")
-        if self.authority.source_commit_sha not in self.authority.authority_ref:
-            raise ValueError("authority_ref does not bind pinned source commit")
-        if self.authority.source_commit_sha not in self.authority.evidence_ref:
-            raise ValueError("evidence_ref does not bind pinned source commit")
-        if self.authority.source_commit_sha not in self.authority.license_ref:
-            raise ValueError("license_ref does not bind pinned source commit")
+
+        expected_authority_ref = f"github:{repository}@{ref}:{path}"
+        if self.authority.authority_ref != expected_authority_ref:
+            raise ValueError("authority_ref does not bind canonical source tuple")
+        expected_evidence_ref = f"{repository}:{path}@{ref}"
+        if self.authority.evidence_ref != expected_evidence_ref:
+            raise ValueError("evidence_ref does not bind canonical source tuple")
+        _validate_license_ref(self.authority.license_ref, repository, ref)
+
+        # capture_provenance_ref is descriptive evidence, not a second authority.
+        # Still derive it exactly from the structured tuple so a rehashed fixture
+        # cannot make the human-readable provenance contradict authoritative data.
+        expected_capture_ref = (
+            f"GitHub immutable source slice {path} lines {lines} at commit {ref}; "
+            f"source repository {self.authority.license_spdx} license preserved"
+        )
+        if self.capture_provenance_ref != expected_capture_ref:
+            raise ValueError("capture_provenance_ref contradicts canonical source tuple")
 
     def _validate_rows(self) -> None:
         if not self.rows:
@@ -591,8 +665,7 @@ def replay_recorded_fixture(
 
 
 def load_recorded_fixture(path: str | Path) -> RecordedMarketFixture:
-    with Path(path).open("r", encoding="utf-8") as handle:
-        payload = json.load(handle)
+    payload = load_strict_json(path, "recorded fixture")
     if not isinstance(payload, Mapping):
         raise ValueError("recorded fixture root must be an object")
     return RecordedMarketFixture.from_mapping(payload)

@@ -344,7 +344,7 @@ def test_invalid_ohlc_envelope_fails_even_with_fresh_digests():
     ("field", "value", "message"),
     [
         ("ref", "0" * 40, "query ref must equal pinned authority source commit"),
-        ("path", "OTHER.csv", "authority endpoint_id does not match query path"),
+        ("path", "OTHER.csv", "source_query does not match canonical source tuple"),
         ("lines", "99-100", "query lines do not match recorded source-slice lines"),
     ],
 )
