@@ -1,8 +1,8 @@
 """Raw provider-capture integrity contracts for Strategy Lab A4 / Run B2.
 
-This module is research/evidence infrastructure only.  It seals exact capture
+This module is research/evidence infrastructure only. It seals exact capture
 bytes, separates request/response/parent observation clocks, and provides
-normalization lineage.  It does not establish provider Currentness, routing,
+normalization lineage. It does not establish provider Currentness, routing,
 SHADOW_ACTIVE, CORE, LIVE, strategy, broker, or trading authority.
 """
 from __future__ import annotations
@@ -114,8 +114,17 @@ def _reject_json_constant(value: str) -> None:
     raise ValueError(f"non-finite JSON constant is forbidden: {value}")
 
 
+def _reject_duplicate_object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key is forbidden: {key}")
+        result[key] = value
+    return result
+
+
 def _json_safe_clone(value: Any, path: str = "$raw") -> Any:
-    """Return JSON-compatible data without implicit ``default=str`` coercion."""
+    """Return JSON-native data without silent coercion or ``default=str``."""
 
     if value is None or isinstance(value, (str, bool, int)):
         return value
@@ -130,7 +139,9 @@ def _json_safe_clone(value: Any, path: str = "$raw") -> Any:
                 raise ValueError(f"{path} contains non-string mapping key")
             output[key] = _json_safe_clone(item, f"{path}.{key}")
         return output
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, tuple):
+        raise ValueError(f"{path} contains non-JSON-native tuple")
+    if isinstance(value, list):
         return [_json_safe_clone(item, f"{path}[{index}]") for index, item in enumerate(value)]
     raise ValueError(f"{path} contains unsupported raw type {type(value).__name__}")
 
@@ -141,7 +152,11 @@ def _strict_json_loads(raw: bytes, label: str) -> Mapping[str, Any]:
     except UnicodeDecodeError as exc:
         raise ValueError(f"{label} must be UTF-8") from exc
     try:
-        payload = json.loads(decoded, parse_constant=_reject_json_constant)
+        payload = json.loads(
+            decoded,
+            parse_constant=_reject_json_constant,
+            object_pairs_hook=_reject_duplicate_object_pairs,
+        )
     except json.JSONDecodeError as exc:
         raise ValueError(f"{label} must be valid JSON") from exc
     if not isinstance(payload, Mapping):
@@ -150,7 +165,7 @@ def _strict_json_loads(raw: bytes, label: str) -> Mapping[str, Any]:
 
 
 def encode_raw_capture(payload: Mapping[str, Any]) -> bytes:
-    """Encode capture JSON deterministically and fail on unknown Python types."""
+    """Encode capture JSON deterministically and fail on unknown/coerced types."""
 
     safe = _json_safe_clone(payload)
     return json.dumps(
@@ -183,6 +198,7 @@ class RawCaptureObservation:
             _trimmed(getattr(self, name), name)
         if self.status not in _ALLOWED_STATUSES:
             raise ValueError(f"unsupported observation status: {self.status}")
+
         request_started = aware_utc(self.request_started_at, "request_started_at")
         parent_observed = aware_utc(self.parent_observed_at, "parent_observed_at")
         response_received = aware_utc(self.response_received_at, "response_received_at")
@@ -204,10 +220,29 @@ class RawCaptureObservation:
             raise ValueError("request_params must be an object")
         object.__setattr__(self, "request_params", deep_freeze(_json_safe_clone(self.request_params)))
         object.__setattr__(self, "raw_payload", deep_freeze(_json_safe_clone(self.raw_payload)))
+
         diagnostics = tuple(self.serialization_diagnostics)
         for item in diagnostics:
             _trimmed(item, "serialization_diagnostic")
         object.__setattr__(self, "serialization_diagnostics", diagnostics)
+
+    @property
+    def capture_complete(self) -> bool:
+        """Structural completeness for the current history-capture research slice.
+
+        This deliberately proves only representable capture shape. It does not
+        infer provider accuracy, session completeness, bar semantics, or
+        Currentness.
+        """
+
+        if self.operation != "history":
+            return False
+        if not isinstance(self.raw_payload, Mapping):
+            return False
+        rows = self.raw_payload.get("raw_rows")
+        if not isinstance(rows, tuple):
+            return False
+        return all(isinstance(row, Mapping) for row in rows)
 
     @property
     def pit_eligible(self) -> bool:
@@ -215,6 +250,7 @@ class RawCaptureObservation:
             self.status == STATUS_OK
             and self.response_received_at is not None
             and not self.serialization_diagnostics
+            and self.capture_complete
         )
 
     @property
@@ -280,15 +316,25 @@ class RawCaptureArtifact:
             _trimmed(getattr(self, name), name)
         _hex(self.capture_tool_commit_sha, "capture_tool_commit_sha", 40)
         _hex(self.capture_tool_blob_sha, "capture_tool_blob_sha", 40)
+
         created = aware_utc(self.artifact_created_at, "artifact_created_at")
         assert created is not None
         object.__setattr__(self, "artifact_created_at", created)
-        if not self.observations:
+
+        try:
+            observations = tuple(self.observations)
+        except TypeError as exc:
+            raise ValueError("observations must be an iterable of RawCaptureObservation") from exc
+        if not observations:
             raise ValueError("raw capture requires at least one observation")
-        identifiers = [item.observation_id for item in self.observations]
+        if any(not isinstance(item, RawCaptureObservation) for item in observations):
+            raise ValueError("observations must contain only RawCaptureObservation")
+        object.__setattr__(self, "observations", observations)
+
+        identifiers = [item.observation_id for item in observations]
         if len(identifiers) != len(set(identifiers)):
             raise ValueError("observation_id values must be unique")
-        if any(item.parent_observed_at > created for item in self.observations):
+        if any(item.parent_observed_at > created for item in observations):
             raise ValueError("artifact_created_at cannot precede parent observation")
 
     @classmethod
@@ -350,13 +396,72 @@ class RawCaptureManifest:
         )
 
 
-@dataclass(frozen=True)
 class SealedRawCapture:
-    artifact: RawCaptureArtifact
-    manifest: RawCaptureManifest
+    """A capture whose semantic object is always rooted in verified exact bytes.
+
+    Ordinary direct construction is intentionally forbidden. The loader/factory
+    binds exact bytes to a manifest digest first, then every access revalidates
+    that binding before exposing the parsed artifact.
+    """
+
+    __slots__ = ("_artifact_bytes", "_manifest")
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise TypeError("SealedRawCapture requires the verified loader/factory path")
+
+    @classmethod
+    def _from_verified_bytes(
+        cls,
+        artifact_bytes: bytes,
+        manifest: RawCaptureManifest,
+    ) -> "SealedRawCapture":
+        actual_digest = sha256(artifact_bytes).hexdigest()
+        if actual_digest != manifest.artifact_sha256:
+            raise ValueError("raw capture artifact digest mismatch")
+        artifact = RawCaptureArtifact.from_mapping(
+            _strict_json_loads(artifact_bytes, "raw capture artifact")
+        )
+        if artifact.capture_id != manifest.capture_id:
+            raise ValueError("manifest capture_id mismatch")
+        if manifest.sealed_at < artifact.artifact_created_at:
+            raise ValueError("manifest sealed_at cannot precede artifact_created_at")
+
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "_artifact_bytes", bytes(artifact_bytes))
+        object.__setattr__(instance, "_manifest", manifest)
+        return instance
+
+    def _verified_artifact(self) -> RawCaptureArtifact:
+        try:
+            artifact_bytes = self._artifact_bytes
+            manifest = self._manifest
+        except AttributeError as exc:
+            raise ValueError("sealed raw capture is not verified") from exc
+        actual_digest = sha256(artifact_bytes).hexdigest()
+        if actual_digest != manifest.artifact_sha256:
+            raise ValueError("sealed raw capture digest verification failed")
+        artifact = RawCaptureArtifact.from_mapping(
+            _strict_json_loads(artifact_bytes, "raw capture artifact")
+        )
+        if artifact.capture_id != manifest.capture_id:
+            raise ValueError("sealed raw capture capture_id mismatch")
+        if manifest.sealed_at < artifact.artifact_created_at:
+            raise ValueError("sealed raw capture chronology invalid")
+        return artifact
+
+    @property
+    def artifact(self) -> RawCaptureArtifact:
+        return self._verified_artifact()
+
+    @property
+    def manifest(self) -> RawCaptureManifest:
+        try:
+            return self._manifest
+        except AttributeError as exc:
+            raise ValueError("sealed raw capture is not verified") from exc
 
     def pit_binding(self, observation_id: str) -> tuple[datetime, datetime]:
-        observation = self.artifact.observation(observation_id)
+        observation = self._verified_artifact().observation(observation_id)
         if not observation.pit_eligible:
             raise ValueError("observation is not eligible for point-in-time normalization")
         assert observation.available_at is not None and observation.observed_at is not None
@@ -375,17 +480,7 @@ def load_sealed_raw_capture(
     )
     if manifest.artifact_filename != artifact_path.name:
         raise ValueError("manifest artifact filename mismatch")
-    actual_digest = sha256(artifact_bytes).hexdigest()
-    if actual_digest != manifest.artifact_sha256:
-        raise ValueError("raw capture artifact digest mismatch")
-    artifact = RawCaptureArtifact.from_mapping(
-        _strict_json_loads(artifact_bytes, "raw capture artifact")
-    )
-    if artifact.capture_id != manifest.capture_id:
-        raise ValueError("manifest capture_id mismatch")
-    if manifest.sealed_at < artifact.artifact_created_at:
-        raise ValueError("manifest sealed_at cannot precede artifact_created_at")
-    return SealedRawCapture(artifact=artifact, manifest=manifest)
+    return SealedRawCapture._from_verified_bytes(artifact_bytes, manifest)
 
 
 @dataclass(frozen=True)
@@ -440,9 +535,14 @@ def build_row_normalization_lineage(
     derived_event_id: str,
     expected_artifact_sha256: str | None = None,
 ) -> NormalizationLineage:
-    if expected_artifact_sha256 is not None and expected_artifact_sha256 != sealed.manifest.artifact_sha256:
+    if not isinstance(sealed, SealedRawCapture):
+        raise ValueError("normalization requires a verified SealedRawCapture")
+    artifact = sealed._verified_artifact()
+    manifest = sealed.manifest
+    if expected_artifact_sha256 is not None and expected_artifact_sha256 != manifest.artifact_sha256:
         raise ValueError("normalization requested against wrong raw artifact digest")
-    observation = sealed.artifact.observation(observation_id)
+
+    observation = artifact.observation(observation_id)
     if not observation.pit_eligible:
         raise ValueError("observation is not eligible for normalization")
     payload = observation.raw_payload
@@ -453,11 +553,12 @@ def build_row_normalization_lineage(
         raise ValueError("raw payload raw_rows must be a list")
     if isinstance(row_index, bool) or not isinstance(row_index, int) or row_index < 0 or row_index >= len(rows):
         raise ValueError("raw row index is out of range")
+
     raw_path = f"observations[{observation_id}].raw_payload.raw_rows[{row_index}]"
     payload_for_digest = {
         "schema_version": NORMALIZATION_LINEAGE_VERSION,
-        "artifact_sha256": sealed.manifest.artifact_sha256,
-        "capture_id": sealed.artifact.capture_id,
+        "artifact_sha256": manifest.artifact_sha256,
+        "capture_id": artifact.capture_id,
         "observation_id": observation_id,
         "raw_path": raw_path,
         "normalizer_version": _trimmed(normalizer_version, "normalizer_version"),
