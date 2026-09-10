@@ -861,3 +861,188 @@ def test_fixr2_3_no_runtime_error_if_producer_mutates_original_after_staging() -
 
     controller.process_pending()  # must not raise RuntimeError
     assert controller.command_results[0].raw_payload["a"] == (1, 2)
+# ---------------------------------------------------------------------------
+# F04 control-evidence fail-loud hardening: ENTITLEMENT / SUBSCRIPTION_RESULT
+# and every other non-DATA control kind reaching the writer with no semantic
+# handler must be recorded as an explicit diagnostic, never silently dropped
+# (frozen contract section 16). No DeliveryMode / REALTIME inference, no
+# unauthorized lifecycle mutation.
+# ---------------------------------------------------------------------------
+
+
+def test_f04_entitlement_event_not_silently_dropped() -> None:
+    controller = _controller()
+    controller.submit_event(_event(ProviderEventKind.ENTITLEMENT))
+    controller.process_pending()
+    snap = controller.snapshot()
+    assert "UNHANDLED_EVIDENCE_KIND:ENTITLEMENT" in snap.findings
+
+
+def test_f04_subscription_result_event_not_silently_dropped() -> None:
+    controller = _controller()
+    controller.submit_event(_event(ProviderEventKind.SUBSCRIPTION_RESULT))
+    controller.process_pending()
+    snap = controller.snapshot()
+    assert "UNHANDLED_EVIDENCE_KIND:SUBSCRIPTION_RESULT" in snap.findings
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        ProviderEventKind.ENTITLEMENT,
+        ProviderEventKind.SUBSCRIPTION_RESULT,
+        ProviderEventKind.HEARTBEAT,
+        ProviderEventKind.TRANSPORT_RECONNECTING,
+    ],
+)
+def test_f04_unhandled_control_kind_is_fail_loud(kind) -> None:
+    controller = _controller()
+    controller.submit_event(_event(kind))
+    controller.process_pending()
+    snap = controller.snapshot()
+    assert f"UNHANDLED_EVIDENCE_KIND:{kind.value}" in snap.findings
+    # no lifecycle advance from any unhandled control evidence
+    assert snap.lifecycle_state is LifecycleState.DISCONNECTED
+
+
+def test_f04_unhandled_evidence_does_not_advance_lifecycle() -> None:
+    controller = _controller()
+    controller.submit_event(_event(ProviderEventKind.ENTITLEMENT))
+    controller.submit_event(_event(ProviderEventKind.SUBSCRIPTION_RESULT))
+    controller.process_pending()
+    snap = controller.snapshot()
+    assert snap.lifecycle_state is LifecycleState.DISCONNECTED
+    # findings are the only trace -- nothing else authoritative changed
+    assert snap.findings == (
+        "UNHANDLED_EVIDENCE_KIND:ENTITLEMENT",
+        "UNHANDLED_EVIDENCE_KIND:SUBSCRIPTION_RESULT",
+    )
+
+
+def test_f04_no_delivery_mode_inferred_from_flagged_event() -> None:
+    from data_provider.live_feed_types import DeliveryMode
+
+    controller = _controller()
+    # Even a caller that (incorrectly) stamps REALTIME on the event must not
+    # cause any DeliveryMode / REALTIME inference in authoritative state.
+    controller.submit_event(
+        _event(ProviderEventKind.ENTITLEMENT, delivery_mode=DeliveryMode.REALTIME)
+    )
+    controller.process_pending()
+    snap = controller.snapshot()
+    assert snap.lifecycle_state is LifecycleState.DISCONNECTED
+    assert not any(
+        "REALTIME" in f or "DELAYED" in f or "DeliveryMode" in f for f in snap.findings
+    )
+    # only the explicit unhandled diagnostic is recorded
+    assert snap.findings == ("UNHANDLED_EVIDENCE_KIND:ENTITLEMENT",)
+
+
+def test_f04_repeated_identical_unhandled_evidence_is_deterministic() -> None:
+    controller = _controller()
+    for _ in range(3):
+        controller.submit_event(_event(ProviderEventKind.ENTITLEMENT))
+    controller.process_pending()
+    snap = controller.snapshot()
+    assert snap.findings == (
+        "UNHANDLED_EVIDENCE_KIND:ENTITLEMENT",
+        "UNHANDLED_EVIDENCE_KIND:ENTITLEMENT",
+        "UNHANDLED_EVIDENCE_KIND:ENTITLEMENT",
+    )
+
+    # identical input + identical run => identical output
+    controller2 = _controller()
+    for _ in range(3):
+        controller2.submit_event(_event(ProviderEventKind.ENTITLEMENT))
+    controller2.process_pending()
+    assert controller2.snapshot().findings == snap.findings
+
+
+def test_f04_connected_disconnected_error_semantics_unchanged() -> None:
+    controller = _controller()
+    controller.submit_event(_event(ProviderEventKind.CONNECTED))
+    controller.process_pending()
+    assert controller.snapshot().lifecycle_state is LifecycleState.CONNECTED
+
+    # interleaved unhandled control evidence must not knock it back
+    controller.submit_event(_event(ProviderEventKind.ENTITLEMENT))
+    controller.process_pending()
+    assert controller.snapshot().lifecycle_state is LifecycleState.CONNECTED
+    assert "UNHANDLED_EVIDENCE_KIND:ENTITLEMENT" in controller.snapshot().findings
+
+    controller.submit_event(_event(ProviderEventKind.DISCONNECTED))
+    controller.process_pending()
+    assert controller.snapshot().lifecycle_state is LifecycleState.RECONNECTING
+
+    # ERROR branch still sets failure_class (unchanged semantics)
+    controller2 = _controller()
+    controller2.submit_event(_event(ProviderEventKind.ERROR))
+    controller2.process_pending()
+    from data_provider.live_feed_types import FailureClass
+
+    assert controller2.snapshot().failure_class is FailureClass.UNKNOWN
+
+
+def test_f04_market_data_reaching_writer_is_not_flagged_as_unhandled() -> None:
+    controller = _controller()
+    controller.submit_event(_event(ProviderEventKind.DATA))
+    controller.process_pending()
+    snap = controller.snapshot()
+    # DATA is expected non-control market-data ingress in Slice 1 -- it must
+    # not be mislabelled as silent control-evidence loss.
+    assert snap.findings == ()
+# ---------------------------------------------------------------------------
+# PR #43 review-gap closure (MINOR, test-only): an unhandled control-evidence
+# event arriving AFTER stop is routed to the existing STALE_EVENT_AFTER_STOP
+# diagnostic (stop takes precedence over fail-loud classification) -- this is
+# the current correct behavior and is locked here as a permanent regression.
+# ---------------------------------------------------------------------------
+
+
+def test_f04_unhandled_evidence_after_stop_is_stale_not_unhandled() -> None:
+    controller = _controller()
+    controller.request_stop()
+    controller.process_pending()
+    assert controller.snapshot().stop_requested is True
+
+    controller.submit_event(_event(ProviderEventKind.ENTITLEMENT))
+    controller.process_pending()
+    snap = controller.snapshot()
+
+    # stop precedence: routed to the existing STALE_EVENT_AFTER_STOP path
+    assert any("STALE_EVENT_AFTER_STOP: ENTITLEMENT" in f for f in snap.findings)
+    # NOT misclassified as an unhandled kind finding
+    assert not any("UNHANDLED_EVIDENCE_KIND:ENTITLEMENT" in f for f in snap.findings)
+    # lifecycle state remains unchanged
+    assert snap.lifecycle_state is LifecycleState.DISCONNECTED
+    # no DeliveryMode / REALTIME inference
+    assert not any(
+        "REALTIME" in f or "DELAYED" in f or "DeliveryMode" in f for f in snap.findings
+    )
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        ProviderEventKind.ENTITLEMENT,
+        ProviderEventKind.SUBSCRIPTION_RESULT,
+    ],
+)
+def test_f04_unhandled_evidence_after_stop_stale_for_control_kinds(kind) -> None:
+    controller = _controller()
+    controller.submit_event(_event(ProviderEventKind.CONNECTED))
+    controller.process_pending()
+    assert controller.snapshot().lifecycle_state is LifecycleState.CONNECTED
+
+    controller.request_stop()
+    controller.process_pending()
+
+    controller.submit_event(_event(kind))
+    controller.process_pending()
+    snap = controller.snapshot()
+
+    assert any(f"STALE_EVENT_AFTER_STOP: {kind.value}" in f for f in snap.findings)
+    assert not any(f"UNHANDLED_EVIDENCE_KIND:{kind.value}" in f for f in snap.findings)
+    # lifecycle stays where it was when stop was applied (CONNECTED, not
+    # advanced or knocked back by the post-stop evidence)
+    assert snap.lifecycle_state is LifecycleState.CONNECTED
