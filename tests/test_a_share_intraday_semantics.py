@@ -5,6 +5,7 @@ import pytest
 from src.services.a_share_intraday_semantics import (
     CN_MARKET_TIMEZONE,
     CN_REGULAR_SESSION_SEGMENTS,
+    CanonicalIntradayIdentity,
     ObservationReadiness,
     ProviderSemanticFacts,
     TimestampSemantic,
@@ -31,6 +32,7 @@ def _facts(
     observation_complete: bool = True,
     market: str = "cn",
     symbol: str = "600000",
+    observed_at: datetime = datetime(2026, 9, 10, 6, 1, tzinfo=timezone.utc),
 ):
     return ProviderSemanticFacts(
         source_token="akshare_em",
@@ -43,7 +45,7 @@ def _facts(
         timestamp_semantic=timestamp_semantic,
         observation_complete=observation_complete,
         provenance_ref="fixture://a-share/a1",
-        observed_at=datetime(2026, 9, 10, 6, 1, tzinfo=timezone.utc),
+        observed_at=observed_at,
     )
 
 
@@ -54,6 +56,7 @@ def _now():
 def test_canonical_cn_session_identity_is_provider_neutral() -> None:
     identity = _identity(15)
     assert identity.market == "cn"
+    assert identity.trading_calendar_id == "CN_A_SHARE"
     assert identity.timezone_name == CN_MARKET_TIMEZONE
     assert identity.session_segments == CN_REGULAR_SESSION_SEGMENTS
     assert identity.session_segments == (("09:30", "11:30"), ("13:00", "15:00"))
@@ -96,10 +99,34 @@ def test_timezone_naive_provider_timestamp_fails_closed() -> None:
 def test_future_provider_timestamp_fails_closed() -> None:
     readiness = assess_observation_readiness(
         _identity(),
-        _facts(provider_timestamp=datetime(2026, 9, 10, 6, 6, tzinfo=timezone.utc)),
+        _facts(
+            provider_timestamp=datetime(2026, 9, 10, 6, 6, tzinfo=timezone.utc),
+            observed_at=datetime(2026, 9, 10, 6, 6, tzinfo=timezone.utc),
+        ),
         now=_now(),
     )
-    assert readiness is ObservationReadiness.FUTURE_PROVIDER_TIMESTAMP
+    assert readiness is ObservationReadiness.FUTURE_OBSERVATION_TIME
+
+
+def test_future_observation_time_fails_closed() -> None:
+    readiness = assess_observation_readiness(
+        _identity(),
+        _facts(observed_at=datetime(2026, 9, 10, 6, 6, tzinfo=timezone.utc)),
+        now=_now(),
+    )
+    assert readiness is ObservationReadiness.FUTURE_OBSERVATION_TIME
+
+
+def test_provider_timestamp_after_observation_fails_closed() -> None:
+    readiness = assess_observation_readiness(
+        _identity(),
+        _facts(
+            provider_timestamp=datetime(2026, 9, 10, 6, 2, tzinfo=timezone.utc),
+            observed_at=datetime(2026, 9, 10, 6, 1, tzinfo=timezone.utc),
+        ),
+        now=_now(),
+    )
+    assert readiness is ObservationReadiness.PROVIDER_TIMESTAMP_AFTER_OBSERVED_AT
 
 
 def test_incomplete_provider_observation_fails_closed() -> None:
@@ -131,8 +158,6 @@ def test_same_trading_date_old_bar_is_not_promoted_to_currentness() -> None:
     )
     envelope = observation_envelope(_identity(), old_same_day, now=_now())
 
-    # A1 only says the evidence is semantically usable by a later gate.
-    # It intentionally does not call a same-date bar fresh/current.
     assert envelope["readiness"] == ObservationReadiness.READY_FOR_DERIVED_GATES.value
     assert envelope["governance"]["same_trading_date_proves_currentness"] is False
     assert envelope["governance"]["positive_currentness_authorized"] is False
@@ -169,8 +194,6 @@ def test_naive_now_is_rejected() -> None:
 
 def test_noncanonical_session_identity_is_rejected() -> None:
     with pytest.raises(ValueError, match="session_segments"):
-        from src.services.a_share_intraday_semantics import CanonicalIntradayIdentity
-
         CanonicalIntradayIdentity(
             market="cn",
             exchange="SSE",
@@ -179,6 +202,21 @@ def test_noncanonical_session_identity_is_rejected() -> None:
             trading_calendar_id="CN_A_SHARE",
             timezone_name="Asia/Shanghai",
             session_segments=(("09:30", "15:00"),),
+            interval_minutes=15,
+            adjustment_mode="NONE",
+        )
+
+
+def test_noncanonical_trading_calendar_identity_is_rejected() -> None:
+    with pytest.raises(ValueError, match="trading calendar"):
+        CanonicalIntradayIdentity(
+            market="cn",
+            exchange="SSE",
+            instrument_id="SSE:600000",
+            symbol="600000",
+            trading_calendar_id="ARBITRARY_CALENDAR",
+            timezone_name="Asia/Shanghai",
+            session_segments=CN_REGULAR_SESSION_SEGMENTS,
             interval_minutes=15,
             adjustment_mode="NONE",
         )
