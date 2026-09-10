@@ -10,12 +10,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
-import json
+from json import dumps
 import math
 from pathlib import Path
 from typing import Any, Mapping
 
 from .replay_contract import aware_utc, deep_freeze, stable_hash
+from .strict_json import loads_strict_json
 
 RAW_CAPTURE_SCHEMA_VERSION = "raw-provider-capture-v0.1"
 RAW_CAPTURE_MANIFEST_VERSION = "raw-provider-capture-manifest-v0.1"
@@ -110,19 +111,6 @@ def _optional_aware(value: Any, name: str) -> datetime | None:
     return _parse_aware(value, name)
 
 
-def _reject_json_constant(value: str) -> None:
-    raise ValueError(f"non-finite JSON constant is forbidden: {value}")
-
-
-def _reject_duplicate_object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError(f"duplicate JSON key is forbidden: {key}")
-        result[key] = value
-    return result
-
-
 def _json_safe_clone(value: Any, path: str = "$raw") -> Any:
     """Return JSON-native data without silent coercion or ``default=str``."""
 
@@ -147,18 +135,9 @@ def _json_safe_clone(value: Any, path: str = "$raw") -> Any:
 
 
 def _strict_json_loads(raw: bytes, label: str) -> Mapping[str, Any]:
-    try:
-        decoded = raw.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise ValueError(f"{label} must be UTF-8") from exc
-    try:
-        payload = json.loads(
-            decoded,
-            parse_constant=_reject_json_constant,
-            object_pairs_hook=_reject_duplicate_object_pairs,
-        )
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{label} must be valid JSON") from exc
+    """Apply the accepted shared strict parser plus A4's object-root contract."""
+
+    payload = loads_strict_json(raw, label)
     if not isinstance(payload, Mapping):
         raise ValueError(f"{label} root must be an object")
     return payload
@@ -168,7 +147,7 @@ def encode_raw_capture(payload: Mapping[str, Any]) -> bytes:
     """Encode capture JSON deterministically and fail on unknown/coerced types."""
 
     safe = _json_safe_clone(payload)
-    return json.dumps(
+    return dumps(
         safe,
         ensure_ascii=False,
         sort_keys=True,
