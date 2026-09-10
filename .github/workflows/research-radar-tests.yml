@@ -16,6 +16,7 @@ on:
       - "src/schemas/research_financials.py"
       - "src/services/a_share_provider_lineage.py"
       - "src/services/a_share_reconciliation_lineage.py"
+      - "src/services/a_share_intraday_semantics.py"
       - "src/services/data_capability_service.py"
       - "src/services/screening/industry_radar.py"
       - "src/services/screening/earnings_valuation_radar.py"
@@ -32,6 +33,7 @@ on:
       - "scripts/run_stock_radar_technical_state.py"
       - "tests/test_a_share_provider_lineage.py"
       - "tests/test_a_share_reconciliation_lineage.py"
+      - "tests/test_a_share_intraday_semantics.py"
       - "tests/test_data_capability_service.py"
       - "tests/test_candidate_pool_repo.py"
       - "tests/test_oos_consumption_ledger_repo.py"
@@ -77,6 +79,7 @@ jobs:
           python -m pytest -q \
             tests/test_a_share_provider_lineage.py \
             tests/test_a_share_reconciliation_lineage.py \
+            tests/test_a_share_intraday_semantics.py \
             tests/test_data_capability_service.py \
             tests/test_alpaca_market_data_adapter.py \
             tests/test_candidate_pool_repo.py \
