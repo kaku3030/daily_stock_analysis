@@ -312,6 +312,14 @@ class DailyQA:
                     row["created_at"],
                     field_name=f"created_at[{row['validation_id']}]",
                 )
+                sqlite_instant = self.queue._connection.execute(
+                    "SELECT julianday(?) AS instant",
+                    (row["created_at"],),
+                ).fetchone()["instant"]
+                if sqlite_instant is None:
+                    raise ValueError(
+                        f"created_at[{row['validation_id']}] cannot be parsed by SQLite julianday"
+                    )
             except ValueError as exc:
                 raise ValueError(
                     "DailyQA cannot safely summarize a signal type containing ambiguous legacy timestamps"
