@@ -145,8 +145,10 @@ class EventRecord:
     source_upstream_lineage_id: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.event_id, str) or not self.event_id.strip():
-            raise ValueError("event_id must be non-empty")
+        for name in ("event_id", "event_type", "source_id", "trace_id"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value.strip() or value != value.strip():
+                raise ValueError(f"{name} must be a non-empty trimmed string")
         if self.source_kind not in {
             "SYNTHETIC",
             "PROVIDER",
@@ -164,8 +166,12 @@ class EventRecord:
         if self.created_at < self.observed_at:
             raise ValueError("created_at cannot precede observed_at")
         object.__setattr__(self, "payload", deep_freeze(self.payload))
-        if not self.checksum:
-            object.__setattr__(self, "checksum", stable_hash(self._checksum_payload()))
+        expected_checksum = stable_hash(self._checksum_payload())
+        if self.checksum:
+            if self.checksum != expected_checksum:
+                raise ValueError("checksum does not match canonical event content")
+        else:
+            object.__setattr__(self, "checksum", expected_checksum)
 
     def _checksum_payload(self) -> dict[str, Any]:
         payload = asdict(self)
