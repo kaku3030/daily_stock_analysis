@@ -204,6 +204,36 @@ def test_daily_qa_rejects_ambiguous_legacy_naive_timestamp() -> None:
         )
 
 
+def test_daily_qa_rejects_python_valid_sqlite_unparseable_legacy_timestamp() -> None:
+    queue = ValidationQueue()
+    queue._connection.execute(
+        """
+        INSERT INTO stock_radar_validation_queue
+            (validation_id, signal_id, signal_type, signal_state, outcome,
+             evidence_json, created_at, resolved_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "legacy-offset-seconds",
+            "legacy-offset-seconds",
+            "breakout",
+            "confirmed",
+            "passed",
+            "{}",
+            "2026-09-10T00:00:00+05:30:30",
+            None,
+        ),
+    )
+    queue._connection.commit()
+
+    with pytest.raises(ValueError, match="ambiguous legacy timestamps"):
+        DailyQA(queue).summarize(
+            "breakout",
+            day=date(2026, 9, 10),
+            timezone_name="Asia/Shanghai",
+        )
+
+
 def test_daily_qa_rejects_unparseable_legacy_timestamp() -> None:
     queue = ValidationQueue()
     queue._connection.execute(
