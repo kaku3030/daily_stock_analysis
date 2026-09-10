@@ -8,7 +8,7 @@ This module deliberately separates three concerns:
 3. deterministic readiness to derive later gates.
 
 It does NOT implement positive Currentness, Continuity, routing, provider I/O,
-strategy, AI, or trading behavior.  A same-date observation is never enough to
+strategy, AI, or trading behavior. A same-date observation is never enough to
 prove intraday currentness here.
 """
 
@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 
 CN_MARKET_TIMEZONE = "Asia/Shanghai"
+CN_TRADING_CALENDAR_ID = "CN_A_SHARE"
 CN_REGULAR_SESSION_SEGMENTS = (("09:30", "11:30"), ("13:00", "15:00"))
 _SUPPORTED_INTERVAL_MINUTES = frozenset({15, 60})
 
@@ -38,6 +39,8 @@ class ObservationReadiness(str, Enum):
     MISSING_PROVIDER_TIMESTAMP = "MISSING_PROVIDER_TIMESTAMP"
     NAIVE_PROVIDER_TIMESTAMP = "NAIVE_PROVIDER_TIMESTAMP"
     FUTURE_PROVIDER_TIMESTAMP = "FUTURE_PROVIDER_TIMESTAMP"
+    FUTURE_OBSERVATION_TIME = "FUTURE_OBSERVATION_TIME"
+    PROVIDER_TIMESTAMP_AFTER_OBSERVED_AT = "PROVIDER_TIMESTAMP_AFTER_OBSERVED_AT"
     PROVIDER_OBSERVATION_INCOMPLETE = "PROVIDER_OBSERVATION_INCOMPLETE"
     IDENTITY_MISMATCH = "IDENTITY_MISMATCH"
 
@@ -72,6 +75,8 @@ class CanonicalIntradayIdentity:
 
         if self.market != "cn":
             raise ValueError("A-share intraday identity requires market='cn'")
+        if self.trading_calendar_id != CN_TRADING_CALENDAR_ID:
+            raise ValueError(f"A-share trading calendar must be {CN_TRADING_CALENDAR_ID}")
         if self.timezone_name != CN_MARKET_TIMEZONE:
             raise ValueError(f"A-share market timezone must be {CN_MARKET_TIMEZONE}")
         if self.session_segments != CN_REGULAR_SESSION_SEGMENTS:
@@ -149,7 +154,7 @@ def build_cn_intraday_identity(
         exchange=exchange,
         instrument_id=instrument_id,
         symbol=symbol,
-        trading_calendar_id="CN_A_SHARE",
+        trading_calendar_id=CN_TRADING_CALENDAR_ID,
         timezone_name=CN_MARKET_TIMEZONE,
         session_segments=CN_REGULAR_SESSION_SEGMENTS,
         interval_minutes=interval_minutes,
@@ -166,7 +171,7 @@ def assess_observation_readiness(
     """Fail closed before any future Currentness/Continuity derivation.
 
     READY means only that the observation has enough explicit semantic evidence
-    to be consumed by a later deterministic gate.  It is NOT a freshness,
+    to be consumed by a later deterministic gate. It is NOT a freshness,
     Currentness, Health, actionability, SHADOW, CORE, or LIVE decision.
     """
 
@@ -192,6 +197,10 @@ def assess_observation_readiness(
     if provider_timestamp.tzinfo is None or provider_timestamp.utcoffset() is None:
         return ObservationReadiness.NAIVE_PROVIDER_TIMESTAMP
 
+    if facts.observed_at > now:
+        return ObservationReadiness.FUTURE_OBSERVATION_TIME
+    if provider_timestamp > facts.observed_at:
+        return ObservationReadiness.PROVIDER_TIMESTAMP_AFTER_OBSERVED_AT
     if provider_timestamp > now:
         return ObservationReadiness.FUTURE_PROVIDER_TIMESTAMP
 
