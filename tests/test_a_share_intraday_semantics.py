@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from src.services.a_share_intraday_semantics import (
+    CN_INTRADAY_ENDPOINT_EXTENSIONS,
     CN_MARKET_TIMEZONE,
     CN_REGULAR_SESSION_SEGMENTS,
     CanonicalIntradayIdentity,
@@ -13,6 +14,7 @@ from src.services.a_share_intraday_semantics import (
     build_cn_intraday_identity,
     observation_envelope,
 )
+from src.services.a_share_provider_lineage import CN_REALTIME_SOURCE_LINEAGE
 
 
 def _identity(interval_minutes: int = 15):
@@ -33,10 +35,12 @@ def _facts(
     market: str = "cn",
     symbol: str = "600000",
     observed_at: datetime = datetime(2026, 9, 10, 6, 1, tzinfo=timezone.utc),
+    source_token: str = "akshare_em",
+    endpoint_id: str = "akshare.eastmoney_intraday",
 ):
     return ProviderSemanticFacts(
-        source_token="akshare_em",
-        endpoint_id="akshare.eastmoney_intraday",
+        source_token=source_token,
+        endpoint_id=endpoint_id,
         market=market,
         symbol=symbol,
         interval_minutes=interval_minutes,
@@ -67,6 +71,34 @@ def test_canonical_cn_session_identity_is_provider_neutral() -> None:
 def test_a1_explicitly_supports_k15_and_k60_identity(interval_minutes: int) -> None:
     identity = _identity(interval_minutes)
     assert identity.interval_minutes == interval_minutes
+
+
+def test_unknown_source_identity_fails_closed() -> None:
+    readiness = assess_observation_readiness(
+        _identity(),
+        _facts(source_token="unknown_provider"),
+        now=_now(),
+    )
+    assert readiness is ObservationReadiness.UNKNOWN_SOURCE_IDENTITY
+
+
+def test_registered_source_with_wrong_intraday_endpoint_fails_closed() -> None:
+    readiness = assess_observation_readiness(
+        _identity(),
+        _facts(endpoint_id="akshare.sina_spot"),
+        now=_now(),
+    )
+    assert readiness is ObservationReadiness.INVALID_INTRADAY_ENDPOINT_BINDING
+
+
+def test_registered_source_with_governed_intraday_extension_may_reach_ready() -> None:
+    readiness = assess_observation_readiness(_identity(), _facts(), now=_now())
+    assert readiness is ObservationReadiness.READY_FOR_DERIVED_GATES
+    assert "akshare_em" in CN_REALTIME_SOURCE_LINEAGE
+    assert CN_INTRADAY_ENDPOINT_EXTENSIONS["akshare_em"] == frozenset(
+        {"akshare.eastmoney_intraday"}
+    )
+    assert CN_REALTIME_SOURCE_LINEAGE["akshare_em"].endpoint_id == "akshare.eastmoney_spot"
 
 
 def test_unknown_timestamp_semantics_fail_closed() -> None:
