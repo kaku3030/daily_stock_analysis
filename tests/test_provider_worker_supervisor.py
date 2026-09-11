@@ -320,6 +320,19 @@ def test_09b_child_cannot_forge_supervisor_terminal(supervisor, forged):
         number=1, process=_FakeProcess(alive=True), command_queue=None,
         result_queue=_FakeQueue([]), release_event=None,
     )
+
+
+def _ignore_shutdown_child(command_queue, result_queue, release_event, boot_mode,
+                           runtime_instance_id, provider_id, worker_generation):
+    result_queue.put({
+        "frame_kind": "LIFECYCLE",
+        "kind": ProviderWorkerEvidenceKind.WORKER_RUNTIME_READY.value,
+        "worker_generation": worker_generation,
+        "observed_at_monotonic_ns": time.monotonic_ns(),
+        "observed_at_utc": datetime.now(timezone.utc).isoformat(),
+    })
+    while True:
+        command_queue.get()
     frame = {
         "frame_kind": "COMMAND_RESULT", "command_id": "c1", "worker_generation": 1,
         "outcome": forged.value, "terminal_observed_at_monotonic_ns": time.monotonic_ns(),
@@ -398,6 +411,29 @@ def test_13_shutdown_while_idle(supervisor):
     supervisor.start_generation()
     supervisor.shutdown()
     assert supervisor.state is SupervisorState.SHUTDOWN
+
+
+def test_13b_start_after_shutdown_is_rejected_without_new_generation(supervisor):
+    supervisor.start_generation()
+    old_generation = supervisor.worker_generation
+    old_pid = supervisor.owned_process_pid
+    supervisor.shutdown()
+    with pytest.raises(AdmissionClosedError):
+        supervisor.start_generation()
+    assert supervisor.worker_generation == old_generation
+    assert supervisor.owned_process_pid == old_pid
+    assert supervisor.state is SupervisorState.SHUTDOWN
+    assert supervisor._shutdown_event.is_set()
+
+
+def test_13c_cooperative_idle_shutdown_does_not_escalate(supervisor, monkeypatch):
+    supervisor.start_generation()
+    process = supervisor._current.process
+    monkeypatch.setattr(process, "terminate", lambda: (_ for _ in ()).throw(AssertionError("terminate called")))
+    monkeypatch.setattr(process, "kill", lambda: (_ for _ in ()).throw(AssertionError("kill called")))
+    supervisor.shutdown()
+    assert process.is_alive() is False
+    assert supervisor._current.dead is True
     assert supervisor._current.process.is_alive() is False
 
 
@@ -469,6 +505,35 @@ def test_15_shutdown_while_hung():
 
     assert elapsed < 5.0
     assert sup._current.process.is_alive() is False
+
+
+def test_15b_graceful_deadline_precedes_escalation():
+    config = _config(graceful_shutdown_timeout_seconds=0.2)
+    sup = ProviderWorkerSupervisor(runtime_instance_id="r1", provider_id="futu", config=config,
+                                   child_target=_ignore_shutdown_child)
+    sup.start_generation()
+    times = []
+    original = sup._hard_kill
+    sup._hard_kill = lambda generation: (times.append(time.monotonic()), original(generation))[1]
+    started = time.monotonic()
+    sup.shutdown()
+    assert times[0] - started >= 0.18
+    assert sup._current.dead is True
+
+
+def test_15c_graceful_timeout_config_is_material():
+    durations = []
+    for graceful in (0.1, 0.3):
+        sup = ProviderWorkerSupervisor(
+            runtime_instance_id="r1", provider_id="futu",
+            config=_config(graceful_shutdown_timeout_seconds=graceful),
+            child_target=_ignore_shutdown_child,
+        )
+        sup.start_generation()
+        started = time.monotonic()
+        sup.shutdown()
+        durations.append(time.monotonic() - started)
+    assert durations[1] - durations[0] >= 0.12
 
 
 # ---------------------------------------------------------------------------

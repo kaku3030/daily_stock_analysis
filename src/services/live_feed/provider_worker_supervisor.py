@@ -357,6 +357,8 @@ class ProviderWorkerSupervisor:
         wait (bounded by startup_timeout_seconds) for readiness."""
         if self._state is SupervisorState.FATAL:
             raise SupervisorFatalError("cannot start a generation: supervisor is FATAL")
+        if self._state is SupervisorState.SHUTDOWN or self._shutdown_event.is_set():
+            raise AdmissionClosedError("cannot start a generation: supervisor shutdown is terminal")
         if self._current is not None and not self._current.dead:
             raise RuntimeError("a live generation already exists; shutdown or replace it first")
 
