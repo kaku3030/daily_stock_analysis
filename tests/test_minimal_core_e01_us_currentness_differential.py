@@ -64,13 +64,7 @@ class _QuoteContext:
 
 
 def _load_production_currentness_functions():
-    """Execute the pinned production Currentness function bodies directly.
-
-    This is an exact source-characterization seam: no Currentness rule is copied
-    or re-expressed here. It intentionally mirrors the merged regression seam in
-    tests/test_realtime_monitor_currentness_negative.py while avoiding optional
-    runtime/SDK imports.
-    """
+    """Execute the pinned production Currentness function bodies directly."""
     source = SERVER.read_text(encoding="utf-8")
     tree = ast.parse(source)
     wanted = {
@@ -125,18 +119,71 @@ PROTECTED_FIELDS = (
 
 
 def _protected_projection(result):
-    """Project only governed differential fields; add no new semantics."""
     return {field: result.get(field) for field in PROTECTED_FIELDS}
 
 
-def _classify(existing, shadow_projection):
-    """Bounded first-stage differential classification.
+def _run_shadow_semantic_reducer(fixture, existing):
+    """Research-only reduced semantic candidate.
 
-    The current Shadow side is intentionally only a protected-field projection.
-    A future semantic candidate must replace this projection explicitly and earn
-    its own review; this harness must not manufacture Currentness behavior.
+    The candidate deliberately does not own provider/history failure paths or
+    calendar acquisition. It consumes explicit fixture evidence plus the two
+    production pure helpers that already own US session/calendar interpretation.
+    Cases outside that narrow reducer surface are SPEC_GAP rather than copied.
+
+    Non-semantic transport/display metadata (latest_bar_time / now_et) is passed
+    through from the characterized Existing result so this experiment measures
+    the decision surface rather than inventing a second formatting owner.
     """
-    return "MATCH" if _protected_projection(existing) == shadow_projection else "SHADOW_REGRESSION"
+    if fixture.get("history_empty") or fixture.get("history_ret", 0) != 0:
+        return "SPEC_GAP", None
+    if not fixture.get("trading_day_map"):
+        return "SPEC_GAP", None
+
+    functions = _load_production_currentness_functions()
+    now_et = fixture["now_et"]
+    trading_day_map = fixture["trading_day_map"]
+    session_phase = functions["_us_session_phase"](now_et)
+    expected_date = functions["_expected_latest_trading_date"](
+        now_et, trading_day_map.keys()
+    )
+    if expected_date is None:
+        return "SPEC_GAP", None
+
+    latest_bar_time = fixture.get("latest_bar_time")
+    if not isinstance(latest_bar_time, str) or len(latest_bar_time) < 10:
+        return "SPEC_GAP", None
+
+    latest_date = latest_bar_time[:10]
+    expected_type = trading_day_map.get(expected_date)
+
+    if latest_date < expected_date:
+        ok = False
+        status = "STALE_OR_MISALIGNED"
+        reason_codes = ["LATEST_BAR_BEFORE_EXPECTED_SESSION"]
+    elif latest_date > expected_date:
+        ok = False
+        status = "STALE_OR_MISALIGNED"
+        reason_codes = ["LATEST_BAR_AHEAD_OF_EXPECTED_SESSION"]
+    elif fixture["timeframe"] in ("1d", "day"):
+        ok = True
+        status = "OK"
+        reason_codes = ["LATEST_BAR_MATCHES_EXPECTED_SESSION"]
+    else:
+        ok = False
+        status = "CURRENTNESS_UNVERIFIED"
+        reason_codes = ["INTRADAY_PROGRESS_NOT_PROVEN"]
+
+    candidate = {
+        "ok": ok,
+        "status": status,
+        "reason_codes": reason_codes,
+        "latest_bar_time": existing.get("latest_bar_time"),
+        "expected_latest_trading_date": expected_date,
+        "expected_trading_date_type": expected_type,
+        "session_phase": session_phase,
+        "now_et": existing.get("now_et"),
+    }
+    return "MATCH" if _protected_projection(existing) == candidate else "SHADOW_REGRESSION", candidate
 
 
 FIXTURES = [
@@ -146,10 +193,8 @@ FIXTURES = [
         "latest_bar_time": "2026-09-11 16:00:00",
         "now_et": datetime(2026, 9, 14, 8, 0),
         "trading_day_map": {"2026-09-11": "WHOLE", "2026-09-14": "WHOLE"},
-        "expect": {
-            "status": "CURRENTNESS_UNVERIFIED",
-            "expected_latest_trading_date": "2026-09-11",
-        },
+        "expect": {"status": "CURRENTNESS_UNVERIFIED", "expected_latest_trading_date": "2026-09-11"},
+        "candidate_classification": "MATCH",
     },
     {
         "fixture_id": "US_INTRADAY_15M_02",
@@ -157,11 +202,8 @@ FIXTURES = [
         "latest_bar_time": "2026-09-10 09:45:00",
         "now_et": datetime(2026, 9, 10, 15, 30),
         "trading_day_map": {"2026-09-10": "WHOLE"},
-        "expect": {
-            "ok": False,
-            "status": "CURRENTNESS_UNVERIFIED",
-            "reason_codes": ["INTRADAY_PROGRESS_NOT_PROVEN"],
-        },
+        "expect": {"ok": False, "status": "CURRENTNESS_UNVERIFIED", "reason_codes": ["INTRADAY_PROGRESS_NOT_PROVEN"]},
+        "candidate_classification": "MATCH",
     },
     {
         "fixture_id": "US_INTRADAY_1H_03",
@@ -169,11 +211,8 @@ FIXTURES = [
         "latest_bar_time": "2026-09-10 10:30:00",
         "now_et": datetime(2026, 9, 10, 15, 30),
         "trading_day_map": {"2026-09-10": "WHOLE"},
-        "expect": {
-            "ok": False,
-            "status": "CURRENTNESS_UNVERIFIED",
-            "reason_codes": ["INTRADAY_PROGRESS_NOT_PROVEN"],
-        },
+        "expect": {"ok": False, "status": "CURRENTNESS_UNVERIFIED", "reason_codes": ["INTRADAY_PROGRESS_NOT_PROVEN"]},
+        "candidate_classification": "MATCH",
     },
     {
         "fixture_id": "US_DAILY_04",
@@ -181,11 +220,8 @@ FIXTURES = [
         "latest_bar_time": "2026-09-10 16:00:00",
         "now_et": datetime(2026, 9, 10, 17, 0),
         "trading_day_map": {"2026-09-10": "WHOLE"},
-        "expect": {
-            "ok": True,
-            "status": "OK",
-            "reason_codes": ["LATEST_BAR_MATCHES_EXPECTED_SESSION"],
-        },
+        "expect": {"ok": True, "status": "OK", "reason_codes": ["LATEST_BAR_MATCHES_EXPECTED_SESSION"]},
+        "candidate_classification": "MATCH",
     },
     {
         "fixture_id": "US_OLDER_05",
@@ -193,11 +229,8 @@ FIXTURES = [
         "latest_bar_time": "2026-09-09 16:00:00",
         "now_et": datetime(2026, 9, 10, 15, 30),
         "trading_day_map": {"2026-09-09": "WHOLE", "2026-09-10": "WHOLE"},
-        "expect": {
-            "ok": False,
-            "status": "STALE_OR_MISALIGNED",
-            "reason_codes": ["LATEST_BAR_BEFORE_EXPECTED_SESSION"],
-        },
+        "expect": {"ok": False, "status": "STALE_OR_MISALIGNED", "reason_codes": ["LATEST_BAR_BEFORE_EXPECTED_SESSION"]},
+        "candidate_classification": "MATCH",
     },
     {
         "fixture_id": "US_AHEAD_06",
@@ -205,11 +238,8 @@ FIXTURES = [
         "latest_bar_time": "2026-09-11 09:45:00",
         "now_et": datetime(2026, 9, 10, 15, 30),
         "trading_day_map": {"2026-09-10": "WHOLE", "2026-09-11": "WHOLE"},
-        "expect": {
-            "ok": False,
-            "status": "STALE_OR_MISALIGNED",
-            "reason_codes": ["LATEST_BAR_AHEAD_OF_EXPECTED_SESSION"],
-        },
+        "expect": {"ok": False, "status": "STALE_OR_MISALIGNED", "reason_codes": ["LATEST_BAR_AHEAD_OF_EXPECTED_SESSION"]},
+        "candidate_classification": "MATCH",
     },
     {
         "fixture_id": "US_CALENDAR_EMPTY_07",
@@ -218,6 +248,7 @@ FIXTURES = [
         "now_et": datetime(2026, 9, 10, 15, 30),
         "trading_day_map": {},
         "expect": {"ok": False},
+        "candidate_classification": "SPEC_GAP",
     },
     {
         "fixture_id": "US_WEEKEND_HOLIDAY_08",
@@ -226,6 +257,7 @@ FIXTURES = [
         "now_et": datetime(2026, 9, 7, 12, 0),
         "trading_day_map": {"2026-09-04": "WHOLE", "2026-09-08": "WHOLE"},
         "expect": {"expected_latest_trading_date": "2026-09-04"},
+        "candidate_classification": "MATCH",
     },
     {
         "fixture_id": "US_DST_09",
@@ -233,10 +265,8 @@ FIXTURES = [
         "latest_bar_time": "2026-03-09 09:45:00",
         "now_et": datetime(2026, 3, 9, 10, 0),
         "trading_day_map": {"2026-03-09": "WHOLE"},
-        "expect": {
-            "status": "CURRENTNESS_UNVERIFIED",
-            "reason_codes": ["INTRADAY_PROGRESS_NOT_PROVEN"],
-        },
+        "expect": {"status": "CURRENTNESS_UNVERIFIED", "reason_codes": ["INTRADAY_PROGRESS_NOT_PROVEN"]},
+        "candidate_classification": "MATCH",
     },
     {
         "fixture_id": "US_HALF_DAY_10",
@@ -244,11 +274,8 @@ FIXTURES = [
         "latest_bar_time": "2026-11-27 10:00:00",
         "now_et": datetime(2026, 11, 27, 12, 0),
         "trading_day_map": {"2026-11-27": "MORNING"},
-        "expect": {
-            "ok": False,
-            "status": "CURRENTNESS_UNVERIFIED",
-            "expected_trading_date_type": "MORNING",
-        },
+        "expect": {"ok": False, "status": "CURRENTNESS_UNVERIFIED", "expected_trading_date_type": "MORNING"},
+        "candidate_classification": "MATCH",
     },
     {
         "fixture_id": "US_MISSING_INVALID_11",
@@ -258,12 +285,13 @@ FIXTURES = [
         "now_et": datetime(2026, 9, 10, 15, 30),
         "trading_day_map": {"2026-09-10": "WHOLE"},
         "expect": {"ok": False},
+        "candidate_classification": "SPEC_GAP",
     },
 ]
 
 
 @pytest.mark.parametrize("fixture", FIXTURES, ids=[item["fixture_id"] for item in FIXTURES])
-def test_e01_existing_characterization_and_protected_projection(fixture):
+def test_e01_existing_characterization_and_reduced_shadow_candidate(fixture):
     existing = _run_existing(fixture)
 
     for key, expected in fixture["expect"].items():
@@ -271,9 +299,12 @@ def test_e01_existing_characterization_and_protected_projection(fixture):
             fixture["fixture_id"], key, expected, existing.get(key), existing
         )
 
-    shadow_projection = _protected_projection(existing)
-    assert _classify(existing, shadow_projection) == "MATCH"
+    classification, candidate = _run_shadow_semantic_reducer(fixture, existing)
+    assert classification == fixture["candidate_classification"]
 
-    # Protected fields stay explicit even when the production result represents
-    # absence/UNKNOWN with None. The harness must not normalize them away.
-    assert set(shadow_projection) == set(PROTECTED_FIELDS)
+    if classification == "MATCH":
+        assert candidate == _protected_projection(existing)
+        assert set(candidate) == set(PROTECTED_FIELDS)
+    else:
+        assert classification == "SPEC_GAP"
+        assert candidate is None
