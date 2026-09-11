@@ -188,11 +188,16 @@ class ResolvedProviderCommandOutcome:
     its runtime/provider identities must equal the envelope identities.
     Provider error fields are evidence strings only -- they never define
     ``FailureClass`` on their own (R3 §4.1).
+
+    ``worker_generation=None`` is only a representational capability for a
+    never-dispatched ``CANCELLED_GENERATION_INVALIDATED`` terminal fact. It
+    does not itself prove that no generation was ever established; only the
+    supervisor that owns generation state may later mint that fact.
     """
 
     runtime_instance_id: str
     provider_id: str
-    worker_generation: int
+    worker_generation: int | None
     command: ProviderCommand
     outcome: ProviderExecutionOutcome
     dispatched_at_monotonic_ns: int | None
@@ -207,7 +212,17 @@ class ResolvedProviderCommandOutcome:
     def __post_init__(self) -> None:
         _require_non_blank_str("runtime_instance_id", self.runtime_instance_id)
         _require_non_blank_str("provider_id", self.provider_id)
-        _require_positive_int("worker_generation", self.worker_generation)
+        if self.worker_generation is None:
+            if not (
+                self.outcome is ProviderExecutionOutcome.CANCELLED_GENERATION_INVALIDATED
+                and self.dispatched_at_monotonic_ns is None
+            ):
+                raise ValueError(
+                    "worker_generation may be None only for an undispatched "
+                    "CANCELLED_GENERATION_INVALIDATED outcome"
+                )
+        else:
+            _require_positive_int("worker_generation", self.worker_generation)
         _require_local_enqueue_seq("local_enqueue_seq", self.local_enqueue_seq)
         _require_non_negative_int("terminal_observed_at_monotonic_ns", self.terminal_observed_at_monotonic_ns)
         _require_aware_utc_canonicalizable("terminal_at_utc", self.terminal_at_utc)
