@@ -56,6 +56,7 @@ env/
 
 # 数据和日志
 /data/
+/realtime_monitor/runtime/
 /.llm_usage_hmac_secret
 **/.llm_usage_hmac_secret
 logs/

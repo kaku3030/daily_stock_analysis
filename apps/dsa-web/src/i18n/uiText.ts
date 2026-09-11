@@ -42,7 +42,7 @@ const zh = {
   'theme.toggle': '切换主题',
 
   'layout.appFallbackDescription': 'Web workspace',
-  'layout.appFallbackTitle': 'Daily Stock Analysis',
+  'layout.appFallbackTitle': 'Stock Razor',
   'layout.collapseSidebar': '折叠侧边栏',
   'layout.desktopSidebar': '桌面侧边导航',
   'layout.desktopUpdateCurrentVersion': '当前版本 {version}',
@@ -999,7 +999,7 @@ const en: Record<UiTextKey, string> = {
   'theme.toggle': 'Toggle theme',
 
   'layout.appFallbackDescription': 'Web workspace',
-  'layout.appFallbackTitle': 'Daily Stock Analysis',
+  'layout.appFallbackTitle': 'Stock Razor',
   'layout.collapseSidebar': 'Collapse sidebar',
   'layout.desktopSidebar': 'Desktop sidebar navigation',
   'layout.desktopUpdateCurrentVersion': 'Current version {version}',
@@ -1149,7 +1149,7 @@ const en: Record<UiTextKey, string> = {
   'home.marketRegionTitle': 'Markets for this review',
   'home.marketRegionUs': 'US',
   'home.notify': 'Send notification',
-  'home.pageTitle': 'Daily Stock Analysis - DSA',
+  'home.pageTitle': 'Stock Razor',
   'home.placeholder': 'Enter a stock code or name, e.g. 600519, Kweichow Moutai, AAPL',
   'home.progressActive': 'In progress',
   'home.reanalyze': 'Reanalyze',

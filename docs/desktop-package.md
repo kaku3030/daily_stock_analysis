@@ -84,12 +84,12 @@ powershell -ExecutionPolicy Bypass -File scripts\build-all.ps1
 请按以下顺序排查：
 
 1. 只从项目的 [GitHub Releases](https://github.com/ZhuLinsen/daily_stock_analysis/releases) 下载附件，并确认安装包架构与 Mac 一致：Apple 芯片（M1/M2/M3/M4 等）使用 `daily-stock-analysis-macos-arm64-<tag>.dmg`，Intel 芯片使用 `daily-stock-analysis-macos-x64-<tag>.dmg`。不要对第三方转载或来源不明的安装包绕过 Gatekeeper。
-2. 打开 DMG，将 `Daily Stock Analysis` 拖入“应用程序”后尝试启动一次。若被拦截，进入“系统设置 -> 隐私与安全性”，在安全性提示处确认应用名称，然后点击“仍要打开”，按系统提示再次确认。较旧 macOS 的对应入口为“系统偏好设置 -> 安全性与隐私 -> 通用”。
+2. 打开 DMG，将 `Stock Razor` 拖入“应用程序”后尝试启动一次。若被拦截，进入“系统设置 -> 隐私与安全性”，在安全性提示处确认应用名称，然后点击“仍要打开”，按系统提示再次确认。较旧 macOS 的对应入口为“系统偏好设置 -> 安全性与隐私 -> 通用”。
 3. 仅当安装包确认来自上述官方 Release、且“仍要打开”仍无法放行时，打开“终端”清除该应用的下载隔离属性，然后重新启动：
 
 ```bash
-xattr -dr com.apple.quarantine "/Applications/Daily Stock Analysis.app"
-open "/Applications/Daily Stock Analysis.app"
+xattr -dr com.apple.quarantine "/Applications/Stock Razor.app"
+open "/Applications/Stock Razor.app"
 ```
 
 如果应用不在 `/Applications`，请将命令中的路径替换为实际 `.app` 路径。不要对整个“应用程序”目录执行 `xattr`，也不要对来源不明的应用执行此命令。不同 macOS 版本可能仍拒绝 unsigned 应用，清除 quarantine 不保证能够放行。长期彻底消除该提示需要在发布流程中接入 Apple Developer 签名与 notarization（公证），不属于上述临时放行步骤。
@@ -97,8 +97,8 @@ open "/Applications/Daily Stock Analysis.app"
 维护者可用以下命令区分“预期的 unsigned 拒绝”和“不可发布的残缺签名”：
 
 ```bash
-codesign -d "/Applications/Daily Stock Analysis.app"
-spctl --assess --type execute --verbose=4 "/Applications/Daily Stock Analysis.app"
+codesign -d "/Applications/Stock Razor.app"
+spctl --assess --type execute --verbose=4 "/Applications/Stock Razor.app"
 ```
 
 当前 unsigned 产物的 `codesign -d` 预期包含 `code object is not signed at all`，`spctl` 预期拒绝；如果输出 `code has no resources but signature indicates they must be present` 或其它签名损坏信息，应视为发布阻断。
@@ -252,7 +252,7 @@ Windows 安装包模式下，安装器仅支持当前用户安装且已禁用管
 
 ```
 win-unpacked/
-  Daily Stock Analysis.exe    <- 双击启动
+  Stock Razor.exe             <- 双击启动
   .env                        <- 用户配置文件（首次启动自动生成）
   data/
     stock_analysis.db         <- 数据库主文件
@@ -350,4 +350,4 @@ Windows 分发现在有两种方式：
 
 1. 解压文件夹
 2. 编辑 `.env` 配置 API Key 和股票列表
-3. 双击 `Daily Stock Analysis.exe` 启动
+3. 双击 `Stock Razor.exe` 启动

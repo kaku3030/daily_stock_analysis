@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use DSA in research, please cite the paper below."
-title: "Daily Stock Analysis (DSA)"
+title: "Stock Razor"
 type: software
 authors:
   - family-names: "Zhu"
