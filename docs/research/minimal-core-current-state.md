@@ -37,13 +37,13 @@ preserved governed semantics
 | E09 | pipeline/read-set | HK symbol representative task measured at 7 file reads | SHADOW evidence |
 | E10 | failure taxonomy | expanded differential found real divergences | SHADOW MORE; universal framework REJECT |
 | E11 | cache semantics | semantic matrix + TTL boundary differential complete | SHADOW evidence; broad unification REJECT |
-| E12 | symbol semantics | fixture corpus + adversarial wrapper Shadow test + 9→3 call-site delta | provider wire remains adapter-local |
+| E12 | symbol semantics | fixture corpus + full routing differential + 9→3 call-site delta | provider wire remains adapter-local |
 
 ## Strongest current DELETE candidates
 
 Not production-approved:
 
-1. **E12 suffix wrappers:** 9 exact-head wrapper-call expressions reduce to 3 Shadow lookups (-6) while preserving the existing classification corpus; production routing equivalence remains pending.
+1. **E12 suffix wrappers:** full Shadow differential preserves market-tag and daily/realtime route decisions across CN/HK/US, JP/KR/TW, unknown and adversarial suffix inputs. The measured 9 wrapper-call expressions reduce to 3 Shadow lookups (-6), with `net_complexity_result = SMALLER`; production routing equivalence and compatibility-import review remain pending.
 2. **E03 YFinance:** retry machinery may be behaviorally inactive on the ordinary wrapped transport path. Decide KEEP-single-attempt-and-simplify vs governed real retry.
 3. **E08 config literals:** backend timeout/output/concurrency defaults are repeated across runtime constants, registry metadata and `.env.example`; tests/imported constants may remove duplicated facts without a config framework.
 4. **E11 positive snapshot cache mechanics:** Efinance/AkShare simple `{data,timestamp,ttl}` mechanics may share a tiny primitive if it is genuinely smaller.
@@ -135,7 +135,7 @@ Do **not** load all historical sync packets unless a provenance question require
 
 ```text
 E10: treat divergences as governed evidence; no common production helper yet
-E12: validate the measured 9→3 call-site delta against routing/adversarial corpus
+E12: re-check exact-head CI and complete compatibility-import review; do not promote production deletion from Shadow evidence alone
 E11: test TTL boundary equivalence before any cache helper
 E08: let exact-head CI validate drift assertions
 E09: choose one representative pipeline change and measure minimum safe read-set

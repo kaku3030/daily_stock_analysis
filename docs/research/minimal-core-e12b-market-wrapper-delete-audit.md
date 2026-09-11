@@ -73,6 +73,13 @@ This does **not** move provider wire formatting into the shared helper.
 
 `tests/test_minimal_core_e12b_market_wrapper_shadow.py` compares current `_market_tag()` with a Shadow implementation that calls `get_suffix_market()` once.
 
+`tests/test_minimal_core_e12_routing_differential.py` extends this to the
+existing daily and realtime route-decision shape. Its corpus covers market
+precedence, CN/HK/US branches, JP/KR/TW mutually-exclusive suffixes, unknown
+suffixes, malformed/adversarial dotted inputs, case/whitespace normalization,
+and index-like symbols. The current and Shadow decisions are compared field by
+field; no provider is called and no production routing code is changed.
+
 The corpus includes:
 
 ```text
@@ -134,8 +141,12 @@ of **-6 wrapper-call expressions** before accounting for the three wrapper
 definitions and local boolean removal. This is an executable call-site/read
 surface measurement, not production approval.
 
-Therefore `net_complexity_result = SMALLER` for the measured call surface;
+The expanded differential preserves the current route decisions for the
+recorded corpus while reducing the suffix portion from three lookups/branches
+to one lookup and a single value check per path. Therefore
+`net_complexity_result = SMALLER` for the measured call/read surface;
 provider routing equivalence and compatibility-import review remain required
-before any production deletion.
+before any production deletion. This remains a Shadow result, not a DELETE
+approval.
 
 No generic `Symbol` object or provider registry is needed for this simplification.
