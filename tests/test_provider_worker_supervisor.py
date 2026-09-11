@@ -309,6 +309,27 @@ def test_09_malformed_frame_protocol_failure(supervisor):
     assert supervisor._current.process.is_alive() is False
 
 
+@pytest.mark.parametrize("forged", [
+    ProviderExecutionOutcome.TIMEOUT,
+    ProviderExecutionOutcome.WORKER_EXITED,
+    ProviderExecutionOutcome.CANCELLED_SHUTDOWN,
+    ProviderExecutionOutcome.CANCELLED_GENERATION_INVALIDATED,
+])
+def test_09b_child_cannot_forge_supervisor_terminal(supervisor, forged):
+    generation = _Generation(
+        number=1, process=_FakeProcess(alive=True), command_queue=None,
+        result_queue=_FakeQueue([]), release_event=None,
+    )
+    frame = {
+        "frame_kind": "COMMAND_RESULT", "command_id": "c1", "worker_generation": 1,
+        "outcome": forged.value, "terminal_observed_at_monotonic_ns": time.monotonic_ns(),
+        "terminal_at_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    result = supervisor._resolve_from_frame(generation, _command(), frame, time.monotonic_ns())
+    assert result.outcome is ProviderExecutionOutcome.PROTOCOL_ERROR
+    assert generation.invalid is True
+
+
 # ---------------------------------------------------------------------------
 # 10. oversized frame -> protocol failure
 # ---------------------------------------------------------------------------
@@ -333,11 +354,11 @@ def test_11_replacement_creates_fresh_generation_local_ipc(supervisor):
     supervisor.shutdown()
     assert supervisor._current.dead is True
 
-    evidence = supervisor.replace_generation()
-    assert evidence.kind is ProviderWorkerEvidenceKind.WORKER_RUNTIME_READY
-    assert supervisor.worker_generation == old_generation_number + 1
-    assert supervisor._current.command_queue is not old_command_queue
-    assert supervisor._current.result_queue is not old_result_queue
+    with pytest.raises(AdmissionClosedError):
+        supervisor.replace_generation()
+    assert supervisor.worker_generation == old_generation_number
+    assert supervisor._current.command_queue is old_command_queue
+    assert supervisor._current.result_queue is old_result_queue
 
 
 # ---------------------------------------------------------------------------
@@ -777,7 +798,7 @@ def test_08e_admitted_before_dispatch_shutdown_never_puts(supervisor, monkeypatc
     release.set()
     thread.join(2)
     assert result[0].outcome is ProviderExecutionOutcome.CANCELLED_SHUTDOWN
-    assert puts == []
+    assert [item for item in puts if item is not None] == []
     assert supervisor._current.dead is True
 
 

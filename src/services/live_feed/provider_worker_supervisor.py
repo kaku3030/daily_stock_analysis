@@ -50,6 +50,14 @@ __all__ = [
     "SupervisorState",
 ]
 
+CHILD_REPORTABLE_TERMINAL_SET = frozenset(
+    {
+        ProviderExecutionOutcome.SUCCEEDED,
+        ProviderExecutionOutcome.PROVIDER_REJECTED,
+        ProviderExecutionOutcome.PROVIDER_EXCEPTION,
+    }
+)
+
 
 # ---------------------------------------------------------------------------
 # Supervisor-level (not Slice A) exceptions and state.
@@ -787,6 +795,11 @@ class ProviderWorkerSupervisor:
             self._record_evidence(evidence)
             return self._finalize_command(generation, command, ProviderExecutionOutcome.PROTOCOL_ERROR,
                 dispatched_at_monotonic_ns, diagnostic_reason="invalid command outcome")
+        if outcome not in CHILD_REPORTABLE_TERMINAL_SET:
+            evidence = self._handle_protocol_failure(generation, frame)
+            self._record_evidence(evidence)
+            return self._finalize_command(generation, command, ProviderExecutionOutcome.PROTOCOL_ERROR,
+                dispatched_at_monotonic_ns, diagnostic_reason="child reported supervisor-owned terminal")
         resolved = self._finalize_command(
             generation,
             command,
@@ -868,6 +881,17 @@ class ProviderWorkerSupervisor:
         if generation is None or generation.dead:
             return
 
+        shutdown_deadline_ns = time.monotonic_ns() + int(
+            self._config.graceful_shutdown_timeout_seconds * 1_000_000_000
+        )
+        try:
+            generation.command_queue.put(None, timeout=self._config.graceful_shutdown_timeout_seconds)
+        except (_queue_module.Full, OSError, ValueError):
+            pass
+        while generation.process.is_alive() and time.monotonic_ns() < shutdown_deadline_ns:
+            remaining_ns = shutdown_deadline_ns - time.monotonic_ns()
+            generation.process.join(min(0.02, remaining_ns / 1_000_000_000))
+
         if not self._hard_kill(generation):
             self._state = SupervisorState.FATAL
 
@@ -876,6 +900,8 @@ class ProviderWorkerSupervisor:
         dead. Never replays the prior generation's in-flight command."""
         if self._state is SupervisorState.FATAL:
             raise SupervisorFatalError("cannot replace: supervisor is FATAL")
+        if self._state is SupervisorState.SHUTDOWN or self._shutdown_event.is_set():
+            raise AdmissionClosedError("cannot replace: supervisor shutdown is terminal")
         if self._current is not None and not self._current.dead:
             raise RuntimeError("current generation is not confirmed dead; cannot replace yet")
         self._state = SupervisorState.CREATED
