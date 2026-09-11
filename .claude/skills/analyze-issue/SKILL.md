@@ -1,8 +1,6 @@
 # Analyze Issue
 
-分析 GitHub Issue，判断其真实性、优先级、仓库责任边界与建议动作。
-
-**Repository**: https://github.com/ZhuLinsen/daily_stock_analysis/issues
+分析 GitHub Issue，判断其真实性、优先级、仓库责任边界与建议动作。优先遵循仓库根目录 `AGENTS.md`；协作流程参考 `docs/ai-collaboration-architecture.md`。
 
 ## Usage
 
@@ -10,134 +8,116 @@
 /analyze-issue <issue_number>
 ```
 
-## Instructions
+## Step 1: Resolve repository and baseline
 
-分析时使用简洁中文，优先遵循仓库根目录 `AGENTS.md`。
-
-### Step 1: 同步最新代码基线
-
-分析 issue 前必须先刷新远端状态，并尽量把本地安全推进到最新基线：
+禁止硬编码历史 owner/repo。先解析当前仓库：
 
 ```bash
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
 git status --short
 git fetch --all --prune
-# 仅当工作区干净且当前分支可 fast-forward 时执行：
+# 仅当工作区干净且当前分支可 fast-forward 时：
 git pull --ff-only
 ```
 
-- 只有在工作区干净、当前分支有可 fast-forward 的上游时，才执行并接受 `git pull --ff-only` 的结果。
-- 如存在本地改动、冲突状态、未跟踪风险文件、无上游分支或无法 fast-forward，不要执行 `stash`、`reset`、强制切分支或覆盖本地状态；改用已 fetch 的 `origin/main` 或相关远端 refs 做分析。
-- 在输出文档的 `Evidence` 中记录同步结果：本地 HEAD、使用的远端基线，以及未更新本地工作树的原因（如有）。
+- 仓库身份无法确认时 fail-loud，不猜测 fallback repository。
+- 如存在本地改动、冲突、未跟踪风险文件、无 upstream 或无法 fast-forward，不执行 stash/reset/强制切分支；使用已 fetch 的远端 refs 做分析。
+- Evidence 中记录本地 HEAD、使用的远端基线，以及未更新工作树的原因（如有）。
 
-### Step 2: 拉取 Issue 信息
+## Step 2: Fetch issue evidence
 
 ```bash
-gh issue view <issue_number> --repo ZhuLinsen/daily_stock_analysis
-gh issue view <issue_number> --repo ZhuLinsen/daily_stock_analysis --comments
+gh issue view <issue_number> --repo "$REPO"
+gh issue view <issue_number> --repo "$REPO" --comments
 ```
 
-如为 bug，优先核对 issue 模板中是否提供了以下信息：
+Bug 优先检查：
 
-- 是否已同步到最新版本
-- commit hash / 版本基线
-- 运行环境与复现步骤
-- 日志或报错信息
+- 版本/commit baseline；
+- 运行环境；
+- 最小复现步骤；
+- 原始日志/错误/时间戳；
+- 是否仍能在当前 main 复现。
 
-### Step 3: 回答 4 个核心问题
+## Step 3: Answer the core questions
 
-1. 版本是否明确
-2. 问题是否真实且可验证
-3. 是否属于仓库责任边界
-4. 是否值得立即处理
+1. 版本是否明确？
+2. 问题是否真实且可验证？
+3. 是否属于本仓库责任边界？
+4. 是否值得现在处理？
+5. 是否需要进入 `/diagnose-bug`，还是已有足够证据直接走 Fast Path？
 
-### Step 4: 结合仓库现状做证据检查
+## Step 4: Read the smallest authoritative surface
 
-- 阅读相关代码、配置、测试、脚本、工作流与文档
-- 如果问题涉及 API、数据源 fallback、报告生成、通知发送、认证、桌面端、发布流程，明确写出影响面
-- 判断是实际 bug、环境配置问题、使用方式问题、还是外部依赖问题
-- 如怀疑已被修复，检查当前代码而不是只看 issue 描述
+只读取定性 issue 所必需的代码、配置、测试、schema、workflow 和专题文档。
 
-### Step 5: 形成结论
+- API / schema / provider / fallback / report / notification / auth / schedule / desktop 等问题必须明确影响路径。
+- 怀疑已修复时，以当前代码/测试/CI 证据为准，不只看 issue 描述。
+- timestamp/currentness/provider/restart 等高风险语义若仍为 UNKNOWN，不用“看起来合理”的默认值补齐。
 
-至少给出以下字段：
+## Step 5: Classify and route
+
+至少给出：
 
 - `版本基线`：最新 / 非最新 / 未提供
-- `是否合理`：是/否 + 理由
-- `是否是 issue`：是/否 + 理由
-- `是否好解决`：是/否 + 难点
+- `是否合理`：是 / 否 + 理由
+- `是否是 issue`：是 / 否 + 理由
 - `结论`：`成立 / 部分成立 / 不成立`
 - `分类`：`bug / feature / docs / question / external`
 - `优先级`：`P0 / P1 / P2 / P3`
 - `难度`：`easy / medium / hard`
-- `建议动作`：`立即修复 / 排期修复 / 文档澄清 / 关闭`
+- `建议动作`：`立即修复 / diagnose-bug / to-spec / 排期 / 文档澄清 / 关闭`
+- `执行路径`：`Fast Path / Deep Path`
 
-### Step 6: 生成分析文档
+Routing：
 
-保存到 `.claude/reviews/issues/issue-<number>.md`
+- 清楚、低风险、已有 test seam -> `/fix-issue` 或 `/implement-ticket`
+- 难复现/根因不明 -> `/diagnose-bug`
+- 有新契约/跨模块/未决设计 -> `/to-spec`
 
-## Output Document Format
+## Step 6: Persist analysis
+
+保存到 `.claude/reviews/issues/issue-<number>.md`：
 
 ```markdown
 # Issue #<number> Analysis
 
-**Date**: YYYY-MM-DD
 **Status**: Pending Review
 
 ## Summary
-
-- 版本基线：
-- 是否合理：
-- 是否是 issue：
-- 是否好解决：
-- 结论：
-- 分类：
-- 优先级：
-- 难度：
-- 建议动作：
+- baseline:
+- conclusion:
+- category:
+- priority:
+- difficulty:
+- route:
 
 ## Evidence
-
-- 代码同步基线：
-- 关键 issue 信息：
-- 关键代码/脚本/工作流证据：
+- repository / baseline:
+- issue evidence:
+- code/test/workflow evidence:
 
 ## Impact Scope
-
-- 受影响模块：
-- 受影响运行路径（本地 / Docker / GitHub Actions / API / Web / Desktop）：
+- modules:
+- runtime paths:
 
 ## Root Cause / Main Reasoning
 
-<根因或主要判断依据>
-
 ## Proposed Handling
-
-<建议修复、澄清或关闭方式>
-
-若建议后续创建 PR，给出的 PR title 建议符合 `AGENTS.md`：使用 `<类型>: <修改内容>`，不添加 `[codex]`、`codex`、`autocode`、`copilot` 或其他工具/agent 来源前缀；该约定仅用于协作一致性提醒，不应单独作为 review process blocker。
 
 ## Risks And Rollback
 
-- 风险点：
-- 若修复，回滚方式：
-
 ## Draft Reply
-
-<建议回复内容>
 ```
 
-## Allowed Auto-Actions (No Confirmation Needed)
+## Allowed Auto-Actions
 
-- 拉取 issue 详情与评论
-- 执行 `git fetch --all --prune`，并在工作区干净且可 fast-forward 时执行 `git pull --ff-only`
-- 阅读相关代码、配置、脚本、工作流和文档
-- 生成分析文档
+- 拉取 issue 详情与评论；
+- `git fetch --all --prune`，以及满足安全条件时 `git pull --ff-only`；
+- 阅读相关仓库内容；
+- 运行非破坏性验证；
+- 生成本地分析文档。
 
 ## Actions Requiring Confirmation
 
-执行以下动作前，先询问用户：
-
-1. 添加或修改标签
-2. 在 issue 下评论
-3. 关闭 issue
-4. 开始修复 issue
+遵循 `AGENTS.md`。尤其在执行 label/comment/close、commit/push、创建 PR 或其它外部写操作前，必须有用户明确授权。
