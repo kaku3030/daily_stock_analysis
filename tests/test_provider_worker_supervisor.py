@@ -320,6 +320,14 @@ def test_09b_child_cannot_forge_supervisor_terminal(supervisor, forged):
         number=1, process=_FakeProcess(alive=True), command_queue=None,
         result_queue=_FakeQueue([]), release_event=None,
     )
+    frame = {
+        "frame_kind": "COMMAND_RESULT", "command_id": "c1", "worker_generation": 1,
+        "outcome": forged.value, "terminal_observed_at_monotonic_ns": time.monotonic_ns(),
+        "terminal_at_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    result = supervisor._resolve_from_frame(generation, _command(), frame, time.monotonic_ns())
+    assert result.outcome is ProviderExecutionOutcome.PROTOCOL_ERROR
+    assert generation.invalid is True
 
 
 def _ignore_shutdown_child(command_queue, result_queue, release_event, boot_mode,
@@ -333,14 +341,6 @@ def _ignore_shutdown_child(command_queue, result_queue, release_event, boot_mode
     })
     while True:
         command_queue.get()
-    frame = {
-        "frame_kind": "COMMAND_RESULT", "command_id": "c1", "worker_generation": 1,
-        "outcome": forged.value, "terminal_observed_at_monotonic_ns": time.monotonic_ns(),
-        "terminal_at_utc": datetime.now(timezone.utc).isoformat(),
-    }
-    result = supervisor._resolve_from_frame(generation, _command(), frame, time.monotonic_ns())
-    assert result.outcome is ProviderExecutionOutcome.PROTOCOL_ERROR
-    assert generation.invalid is True
 
 
 # ---------------------------------------------------------------------------
