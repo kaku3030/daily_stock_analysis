@@ -127,6 +127,15 @@ If external/downstream consumers rely on these private helpers, a deprecation se
 
 For `_market_tag()` itself, the Shadow form is clearly smaller.
 
-For deleting all three wrappers repo-wide: **UNKNOWN pending call-site migration/read-set count**.
+For the exact-head repository-wide call surface, the AST Shadow audit records
+9 wrapper calls (3 in each of the market-tag, daily-routing, and
+realtime-routing paths). A one-lookup-per-path candidate is 3 calls, a delta
+of **-6 wrapper-call expressions** before accounting for the three wrapper
+definitions and local boolean removal. This is an executable call-site/read
+surface measurement, not production approval.
+
+Therefore `net_complexity_result = SMALLER` for the measured call surface;
+provider routing equivalence and compatibility-import review remain required
+before any production deletion.
 
 No generic `Symbol` object or provider registry is needed for this simplification.
