@@ -151,10 +151,10 @@ Historical sync/delta packets remain in `docs/research/cross-project-sync-minima
 
 ```text
 branch: research/minimal-core-initiative-v0-1
-head: b3315d3366f72be03507e0550e6da4d47d600d3d
-commit: research: extend E12 routing differential shadow
+head: d4c61d8c4a7f69c88c87f46ea6960ee62c63ccaa
+commit: test: fix E12 routing differential imports
 mode: Research / Shadow only
 production runtime: unchanged
 PR #71: open, unmerged
-exact-head checks: in progress at sync time
+exact-head checks: CI #219 success; Research Radar Tests #237 success
 ```
