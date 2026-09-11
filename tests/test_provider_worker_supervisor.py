@@ -11,6 +11,7 @@ synchronization mechanism").
 from __future__ import annotations
 
 import multiprocessing
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -687,6 +688,112 @@ def test_24_repeated_race_stress_terminal_uniqueness(supervisor):
             ProviderExecutionOutcome.TIMEOUT,
         }
     supervisor._current = None
+
+
+def test_08c_real_unexpected_child_exit_tears_down_generation(supervisor):
+    supervisor.start_generation()
+    outcome = supervisor.submit_command(_command(), payload={"behavior": "exit_before_result"})
+    generation = supervisor._current
+    assert outcome.outcome is ProviderExecutionOutcome.WORKER_EXITED
+    assert generation.dead is True
+    assert generation.invalid is True
+    assert supervisor.replace_generation().kind is ProviderWorkerEvidenceKind.WORKER_RUNTIME_READY
+    supervisor.shutdown()
+
+
+def test_08c_startup_exit_tears_down_generation(supervisor):
+    supervisor._generation_seq += 1
+    generation_number = supervisor._generation_seq
+    command_queue = supervisor._ctx.Queue(maxsize=8)
+    result_queue = supervisor._ctx.Queue(maxsize=8)
+    release_event = supervisor._ctx.Event()
+    evidence = supervisor._start_generation_with_boot_mode(
+        generation_number, command_queue, result_queue, release_event, boot_mode="exit_immediately"
+    )
+    generation = supervisor._current
+    assert evidence.kind is ProviderWorkerEvidenceKind.WORKER_EXITED
+    assert generation.dead is True
+    assert generation.invalid is True
+    assert supervisor.replace_generation().kind is ProviderWorkerEvidenceKind.WORKER_RUNTIME_READY
+    supervisor.shutdown()
+
+
+class _TrackingQueue:
+    def __init__(self):
+        self.closed = False
+        self.joined = False
+
+    def close(self):
+        self.closed = True
+
+    def join_thread(self):
+        self.joined = True
+
+
+def test_08g_confirmed_death_disposes_queue_resources(supervisor):
+    generation = _Generation(
+        number=1, process=_FakeProcess(alive=False), command_queue=_TrackingQueue(),
+        result_queue=_TrackingQueue(), release_event=None,
+    )
+    assert supervisor._hard_kill(generation) is True
+    assert generation.command_queue.closed and generation.command_queue.joined
+    assert generation.result_queue.closed and generation.result_queue.joined
+
+
+def test_08d_duplicate_command_id_collision_fails_closed(supervisor):
+    supervisor.start_generation()
+    first = supervisor.submit_command(_command(command_id="collision"), payload={"behavior": "success"})
+    assert supervisor.submit_command(_command(command_id="collision"), payload={"behavior": "success"}) is first
+    with pytest.raises(ValueError, match="collision"):
+        supervisor.submit_command(
+            _command(command_id="collision", command_type=ProviderCommandType.CONNECT),
+            payload={"behavior": "success"},
+        )
+    supervisor.shutdown()
+
+
+def test_08e_admitted_before_dispatch_shutdown_never_puts(supervisor, monkeypatch):
+    supervisor.start_generation()
+    entered = threading.Event()
+    release = threading.Event()
+    original_put = supervisor._current.command_queue.put
+    puts = []
+
+    def before_dispatch():
+        entered.set()
+        release.wait(2)
+
+    def tracked_put(*args, **kwargs):
+        puts.append(args[0])
+        return original_put(*args, **kwargs)
+
+    monkeypatch.setattr(supervisor, "_before_dispatch", before_dispatch)
+    monkeypatch.setattr(supervisor._current.command_queue, "put", tracked_put)
+    result = []
+    thread = threading.Thread(target=lambda: result.append(supervisor.submit_command(_command(), payload={"behavior": "success"})))
+    thread.start()
+    assert entered.wait(2)
+    supervisor.shutdown()
+    release.set()
+    thread.join(2)
+    assert result[0].outcome is ProviderExecutionOutcome.CANCELLED_SHUTDOWN
+    assert puts == []
+    assert supervisor._current.dead is True
+
+
+def test_08f_startup_generation_mismatch_fails_closed(supervisor):
+    fake_gen = _Generation(
+        number=2, process=_FakeProcess(alive=True), command_queue=None,
+        result_queue=_FakeQueue([{
+            "frame_kind": "LIFECYCLE", "kind": ProviderWorkerEvidenceKind.WORKER_RUNTIME_READY.value,
+            "worker_generation": 1, "observed_at_monotonic_ns": time.monotonic_ns(),
+            "observed_at_utc": datetime.now(timezone.utc).isoformat(),
+        }]), release_event=None,
+    )
+    evidence = supervisor._await_startup(fake_gen, time.monotonic_ns() + 1_000_000_000)
+    assert evidence.kind is ProviderWorkerEvidenceKind.WORKER_PROTOCOL_FATAL
+    assert fake_gen.dead is True
+    assert fake_gen.invalid is True
 
 
 def test_25_invalid_outcome_is_protocol_error(supervisor):

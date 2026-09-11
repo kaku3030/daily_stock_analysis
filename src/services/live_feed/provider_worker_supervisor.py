@@ -320,7 +320,7 @@ class ProviderWorkerSupervisor:
         self._current: _Generation | None = None
         self._in_flight_command_id: str | None = None
         self._evidence_log: list[ProviderWorkerLifecycleEvidence] = []
-        self._terminal_ledger: dict[str, ResolvedProviderCommandOutcome] = {}
+        self._terminal_ledger: dict[str, tuple[tuple[Any, ...], ResolvedProviderCommandOutcome]] = {}
 
     # -- introspection -----------------------------------------------------
 
@@ -412,7 +412,7 @@ class ProviderWorkerSupervisor:
 
             if not generation.process.is_alive():
                 exit_code = generation.process.exitcode
-                generation.dead = True
+                self._hard_kill(generation)
                 return ProviderWorkerLifecycleEvidence(
                     runtime_instance_id=self._runtime_instance_id,
                     provider_id=self._provider_id,
@@ -435,6 +435,8 @@ class ProviderWorkerSupervisor:
                 return self._handle_protocol_failure(generation, frame)
 
             if frame.get("frame_kind") == "LIFECYCLE" and frame.get("kind") == ProviderWorkerEvidenceKind.WORKER_RUNTIME_READY.value:
+                if frame.get("worker_generation") != generation.number:
+                    return self._handle_protocol_failure(generation, frame)
                 generation.ready = True
                 self._state = SupervisorState.RUNNING
                 return ProviderWorkerLifecycleEvidence(
@@ -450,6 +452,8 @@ class ProviderWorkerSupervisor:
                 )
 
             if frame.get("frame_kind") == "LIFECYCLE" and frame.get("kind") == ProviderWorkerEvidenceKind.WORKER_INIT_FAILED.value:
+                if frame.get("worker_generation") != generation.number:
+                    return self._handle_protocol_failure(generation, frame)
                 death_confirmed = self._hard_kill(generation)
                 if not death_confirmed:
                     self._state = SupervisorState.FATAL
@@ -472,6 +476,8 @@ class ProviderWorkerSupervisor:
             # Anything else during startup is ignored as noise, not
             # authoritative (defensive only; the fake child never emits
             # extra frames pre-READY).
+            if frame.get("frame_kind") == "LIFECYCLE":
+                return self._handle_protocol_failure(generation, frame)
 
     def _handle_startup_timeout(self, generation: _Generation) -> ProviderWorkerLifecycleEvidence:
         death_confirmed = self._hard_kill(generation)
@@ -588,6 +594,12 @@ class ProviderWorkerSupervisor:
                     close()
                 except (OSError, ValueError):
                     pass
+                join_thread = getattr(channel, "join_thread", None)
+                if join_thread is not None:
+                    try:
+                        join_thread()
+                    except (OSError, ValueError, AssertionError):
+                        pass
 
     def _confirm_process_death(self, generation: _Generation) -> bool:
         """Positive death confirmation seam. Overridable/monkeypatchable
@@ -606,10 +618,14 @@ class ProviderWorkerSupervisor:
         if not isinstance(command, ProviderCommand):
             raise ValueError("command must be a ProviderCommand")
 
+        identity = self._command_identity(command)
         with self._admission_lock:
             existing = self._terminal_ledger.get(command.command_id)
             if existing is not None:
-                return existing
+                existing_identity, existing_outcome = existing
+                if existing_identity != identity:
+                    raise ValueError("command_id collision with different immutable command identity")
+                return existing_outcome
             if self._state is SupervisorState.FATAL:
                 raise SupervisorFatalError("supervisor is FATAL; no commands accepted")
             if self._state is SupervisorState.SHUTDOWN:
@@ -624,13 +640,14 @@ class ProviderWorkerSupervisor:
             self._in_flight_command_id = command.command_id
             generation = self._current
 
-            self._before_dispatch()
+        self._before_dispatch()
+        with self._admission_lock:
             if self._shutdown_event.is_set():
                 outcome = self._finalize_command(
                     generation, command, ProviderExecutionOutcome.CANCELLED_SHUTDOWN,
                     None, diagnostic_reason="shutdown requested before dispatch",
                 )
-                self._terminal_ledger[command.command_id] = outcome
+                self._terminal_ledger[command.command_id] = (identity, outcome)
                 self._in_flight_command_id = None
                 return outcome
 
@@ -649,7 +666,7 @@ class ProviderWorkerSupervisor:
                 None, diagnostic_reason="bounded command admission failed",
             )
             with self._admission_lock:
-                self._terminal_ledger[command.command_id] = outcome
+                self._terminal_ledger[command.command_id] = (identity, outcome)
                 self._in_flight_command_id = None
             return outcome
         deadline_ns = dispatched_at_monotonic_ns + int(timeout_seconds * 1_000_000_000)
@@ -658,12 +675,25 @@ class ProviderWorkerSupervisor:
             generation, command, dispatched_at_monotonic_ns, deadline_ns
         )
         with self._admission_lock:
-            self._terminal_ledger[command.command_id] = outcome
+            self._terminal_ledger[command.command_id] = (identity, outcome)
             self._in_flight_command_id = None
         return outcome
 
     def _before_dispatch(self) -> None:
         """Deterministic seam for the admission/dispatch shutdown race."""
+
+    @staticmethod
+    def _command_identity(command: ProviderCommand) -> tuple[Any, ...]:
+        return (
+            command.command_id,
+            command.command_type,
+            command.controller_generation,
+            command.desired_registry_revision,
+            command.runtime_instance_id,
+            command.provider_id,
+            command.stream_subscription_epoch,
+            command.semantic_stream_key,
+        )
 
     def _await_command_resolution(
         self,
@@ -710,6 +740,7 @@ class ProviderWorkerSupervisor:
 
             # 3) Unexpected process exit (not one we killed ourselves).
             if not generation.process.is_alive():
+                self._hard_kill(generation)
                 return self._finalize_command(
                     generation,
                     command,
