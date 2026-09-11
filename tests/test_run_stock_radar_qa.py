@@ -1,9 +1,9 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from scripts.run_stock_radar_qa import run
-from src.services.stock_radar_v2.validation import ValidationQueue
+from src.services.stock_radar_v2.validation import DailyQA, ValidationQueue
 
 
 def _resolved(database, signal_type: str, outcomes: list[str]) -> None:
@@ -15,6 +15,23 @@ def _resolved(database, signal_type: str, outcomes: list[str]) -> None:
             signal_state="confirmed",
         )
         queue.resolve(item.validation_id, outcome)
+
+
+def test_daily_qa_assigns_utc_timestamp_to_shanghai_report_day(tmp_path) -> None:
+    database = tmp_path / "stock_analysis.db"
+    queue = ValidationQueue(database)
+    item = queue.enqueue(
+        signal_id="boundary-0",
+        signal_type="breakout",
+        signal_state="confirmed",
+        created_at=datetime(2026, 9, 10, 23, 12, tzinfo=timezone.utc),
+    )
+    queue.resolve(item.validation_id, "passed")
+
+    result = DailyQA(queue).summarize("breakout", day=datetime(2026, 9, 11).date())
+
+    assert result["day"] == "2026-09-11"
+    assert result["total"] == 1
 
 
 def test_daily_run_uses_main_sqlite_and_writes_reports(tmp_path, monkeypatch) -> None:

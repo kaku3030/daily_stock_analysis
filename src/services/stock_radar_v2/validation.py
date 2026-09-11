@@ -7,6 +7,7 @@ import sqlite3
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any, Mapping
 from uuid import uuid4
@@ -219,20 +220,28 @@ class ValidationQueue:
 
 
 class DailyQA:
+    REPORT_TIMEZONE = ZoneInfo("Asia/Shanghai")
+
     def __init__(self, queue: ValidationQueue) -> None:
         self.queue = queue
 
     def summarize(self, signal_type: str, *, day: date | None = None) -> dict[str, Any]:
-        target = (day or datetime.now(timezone.utc).date()).isoformat()
+        target = (day or datetime.now(self.REPORT_TIMEZONE).date()).isoformat()
         rows = self.queue._connection.execute(
             """
-            SELECT outcome, COUNT(*) AS count FROM stock_radar_validation_queue
-            WHERE signal_type = ? AND substr(created_at, 1, 10) = ?
-            GROUP BY outcome
+            SELECT outcome, created_at FROM stock_radar_validation_queue
+            WHERE signal_type = ?
             """,
-            (signal_type, target),
+            (signal_type,),
         ).fetchall()
-        counts = {str(row["outcome"]): int(row["count"]) for row in rows}
+        counts: dict[str, int] = {}
+        for row in rows:
+            created_at = datetime.fromisoformat(str(row["created_at"]))
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            if created_at.astimezone(self.REPORT_TIMEZONE).date().isoformat() == target:
+                outcome = str(row["outcome"])
+                counts[outcome] = counts.get(outcome, 0) + 1
         return {
             "signal_type": signal_type,
             "day": target,
