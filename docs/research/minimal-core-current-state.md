@@ -34,17 +34,17 @@ preserved governed semantics
 | E06 | Agent read-set/token | benchmark spec | SHADOW |
 | E07 | Headroom/tool output | protected-field benchmark spec | SHADOW only |
 | E08 | config facts | bounded drift matrix + Shadow test | tests/imported constants before framework |
-| E09 | pipeline/read-set | research candidate | not yet executable |
+| E09 | pipeline/read-set | HK symbol representative task measured at 7 file reads | SHADOW evidence |
 | E10 | failure taxonomy | expanded differential found real divergences | SHADOW MORE; universal framework REJECT |
-| E11 | cache semantics | semantic matrix complete | ordinary positive caches only; broad unification REJECT |
+| E11 | cache semantics | semantic matrix + TTL boundary differential complete | SHADOW evidence; broad unification REJECT |
 | E12 | symbol semantics | fixture corpus + wrapper Shadow test | provider wire remains adapter-local |
 
 ## Strongest current DELETE candidates
 
 Not production-approved:
 
-1. **E03 YFinance:** retry machinery may be behaviorally inactive on the ordinary wrapped transport path. Decide KEEP-single-attempt-and-simplify vs governed real retry.
-2. **E12 suffix wrappers:** `_is_jp_market/_is_kr_market/_is_tw_market` are thin delegates; repeated call sites may use one `get_suffix_market()` lookup instead.
+1. **E12 suffix wrappers:** `_is_jp_market/_is_kr_market/_is_tw_market` are thin delegates; repeated call sites may use one `get_suffix_market()` lookup instead.
+2. **E03 YFinance:** retry machinery may be behaviorally inactive on the ordinary wrapped transport path. Decide KEEP-single-attempt-and-simplify vs governed real retry.
 3. **E08 config literals:** backend timeout/output/concurrency defaults are repeated across runtime constants, registry metadata and `.env.example`; tests/imported constants may remove duplicated facts without a config framework.
 4. **E11 positive snapshot cache mechanics:** Efinance/AkShare simple `{data,timestamp,ttl}` mechanics may share a tiny primitive if it is genuinely smaller.
 
@@ -146,3 +146,15 @@ E09: choose one representative pipeline change and measure minimum safe read-set
 Historical sync/delta packets remain in `docs/research/cross-project-sync-minimal-core-v0.*.md` for traceability. They are not current-state authority.
 
 **Current-state authority for Minimal Core research is this file plus exact-head GitHub/CI evidence.**
+
+## Latest exact-head evidence
+
+```text
+branch: research/minimal-core-initiative-v0-1
+head: 085aeee00201c343c54941137d2d54906f28aba1
+commit: research: add E11 TTL evidence, E09 read-set, and delete ranking
+mode: Research / Shadow only
+production runtime: unchanged
+PR #71: open, unmerged
+exact-head checks: in progress at sync time
+```
