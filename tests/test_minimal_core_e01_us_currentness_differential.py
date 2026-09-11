@@ -1,4 +1,6 @@
 import ast
+import json
+import subprocess
 from datetime import datetime, time, timedelta
 from pathlib import Path
 
@@ -8,6 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SERVER = ROOT / "realtime_monitor" / "server.py"
 PRODUCTION_BASELINE = "ef27aec4d8f5cb89093399081fcd5e750473f99c"
+ARTIFACT = ROOT / "tests" / "fixtures" / "e01_existing_vs_shadow_11row.json"
 
 
 class _KLType:
@@ -64,8 +67,11 @@ class _QuoteContext:
 
 
 def _load_production_currentness_functions():
-    """Execute the pinned production Currentness function bodies directly."""
-    source = SERVER.read_text(encoding="utf-8")
+    """Execute function bodies from the executable, pinned source revision."""
+    source = subprocess.check_output(
+        ["git", "show", f"{PRODUCTION_BASELINE}:realtime_monitor/server.py"],
+        cwd=ROOT, text=True, encoding="utf-8",
+    )
     tree = ast.parse(source)
     wanted = {
         "_us_session_phase",
@@ -308,3 +314,31 @@ def test_e01_existing_characterization_and_reduced_shadow_candidate(fixture):
     else:
         assert classification == "SPEC_GAP"
         assert candidate is None
+    # Protected fields stay explicit even when the production result represents
+    # absence/UNKNOWN with None. The harness must not normalize them away.
+    assert set(candidate or _protected_projection(existing)) == set(PROTECTED_FIELDS)
+
+
+def test_e01_independent_artifact_has_11_rows_and_evidence_accounting():
+    rows = json.loads(ARTIFACT.read_text(encoding="utf-8"))
+    assert rows["source_revision"] == PRODUCTION_BASELINE
+    assert rows["calendar_identity"] == "fixture.trading_day_map"
+    assert rows["source_identity"] == "US.NVDA / fixture"
+    assert len(rows["rows"]) == 11
+    assert {row["classification"] for row in rows["rows"]} == {"MATCH", "SPEC_GAP"}
+    assert sum(row["classification"] == "MATCH" for row in rows["rows"]) == 9
+    assert sum(row["classification"] == "SPEC_GAP" for row in rows["rows"]) == 2
+    assert rows["unknown_or_absence_rows"] == ["US_CALENDAR_EMPTY_07", "US_MISSING_INVALID_11"]
+
+
+def test_e06_semantic_owner_read_set_is_measured():
+    source = SERVER.read_text(encoding="utf-8")
+    owner = "_data_health_check_core"
+    tree = ast.parse(source)
+    node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == owner)
+    reads = sorted({n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)})
+    assert set(["now_et", "trading_day_map", "timeframe", "latest_bar_time"]).issubset(reads)
+    evidence = json.loads(ARTIFACT.read_text(encoding="utf-8"))["e06"]
+    assert evidence["semantic_owner"] == "realtime_monitor.server._data_health_check_core"
+    assert evidence["read_set"] == ["latest_bar_time", "now_et", "timeframe", "trading_day_map"]
+    assert evidence["net_complexity_result"] == "SMALLER"
