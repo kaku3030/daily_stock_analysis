@@ -13,13 +13,107 @@ own regression coverage. build_ai_invocation_plan() and
 compare_analysis_states() are exercised directly (unmodified) to prove
 their existing generic non-OK gates keep behaving identically once
 CURRENTNESS_UNVERIFIED starts propagating distinctly.
+
+realtime_monitor.server is never imported directly: its module scope pulls
+in optional runtime SDKs (anthropic/openai/mcp/futu) that a CI test runner
+need not install. Instead this mirrors the AST-extraction isolation pattern
+already used by test_realtime_monitor_currentness_negative.py: parse the
+source, pull out just the bundle-aggregation seam, and exec it into a
+minimal namespace.
 """
 
-from datetime import datetime
+import ast
+import json
+import math
+from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 
-import realtime_monitor.server as server
+ROOT = Path(__file__).resolve().parents[1]
+SERVER_PATH = ROOT / "realtime_monitor" / "server.py"
+
+_WANTED_FUNCTIONS = {
+    "clean_json_value",
+    "_bundle_status_tier",
+    "_reduce_bundle_status",
+    "get_primary_market_bundle_health",
+    "build_ai_invocation_plan",
+    "compare_analysis_states",
+}
+_WANTED_ASSIGNMENTS = {"_BUNDLE_STATUS_TIER_RANK"}
+
+# Names get_primary_market_bundle_health() calls out to but that this seam
+# does not extract (they touch the quote-context SDK / disk / network).
+# Pre-declared so monkeypatch.setattr(server, name, fake) has an existing
+# attribute to replace in each test.
+_EXTERNAL_DEPENDENCIES = (
+    "get_primary_market_bundle",
+    "get_quote_ctx",
+    "_fetch_us_trading_days",
+    "_us_eastern_now",
+    "_data_health_check_core",
+)
+
+
+class _LoadedModule:
+    """Thin attribute-style view over the exec() namespace dict.
+
+    Must wrap the *same* dict object passed as `exec`'s globals (not a copy)
+    so that monkeypatch.setattr(server, name, fake) actually changes what
+    the extracted functions see when they look up that name as a global.
+    """
+
+    def __init__(self, namespace):
+        object.__setattr__(self, "_namespace", namespace)
+
+    def __getattr__(self, name):
+        try:
+            return self._namespace[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+
+    def __setattr__(self, name, value):
+        self._namespace[name] = value
+
+    def __delattr__(self, name):
+        del self._namespace[name]
+
+
+def _load_bundle_functions():
+    """Load only the bundle-aggregation seam from server.py, without the
+    module's optional runtime SDK imports (anthropic/openai/mcp/futu)."""
+    source = SERVER_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    nodes = []
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name in _WANTED_FUNCTIONS:
+            node.decorator_list = []
+            nodes.append(node)
+        elif (isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id in _WANTED_ASSIGNMENTS):
+            nodes.append(node)
+    found_names = {
+        node.name if isinstance(node, ast.FunctionDef) else node.targets[0].id
+        for node in nodes
+    }
+    assert found_names == _WANTED_FUNCTIONS | _WANTED_ASSIGNMENTS, found_names
+    module = ast.Module(body=nodes, type_ignores=[])
+    ast.fix_missing_locations(module)
+    namespace = {
+        "math": math,
+        "json": json,
+        "datetime": datetime,
+        "timedelta": timedelta,
+        **{name: None for name in _EXTERNAL_DEPENDENCIES},
+    }
+    exec(compile(module, str(SERVER_PATH), "exec"), namespace)
+    return _LoadedModule(namespace)
+
+
+server = _load_bundle_functions()
 
 
 # ---------------------------------------------------------------------------
