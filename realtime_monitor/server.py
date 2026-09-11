@@ -5741,8 +5741,16 @@ def _data_health_check_core(q, symbol, timeframe, now_et=None,
     bar_date = str(latest_bar_time)[:10]
 
     if bar_date == expected_date:
-        status = "OK"
-        reasons = ["LATEST_BAR_MATCHES_EXPECTED_SESSION"]
+        if timeframe in ("day", "1d"):
+            status = "OK"
+            reasons = ["LATEST_BAR_MATCHES_EXPECTED_SESSION"]
+        else:
+            # Intraday: the latest bar's calendar date matching the expected
+            # trading date proves only that the bar belongs to today's
+            # session, not that it reflects intraday progress within that
+            # session -- date equality alone must not produce OK here.
+            status = "CURRENTNESS_UNVERIFIED"
+            reasons = ["INTRADAY_PROGRESS_NOT_PROVEN"]
     elif bar_date < expected_date:
         status = "STALE_OR_MISALIGNED"
         reasons = ["LATEST_BAR_BEFORE_EXPECTED_SESSION"]
