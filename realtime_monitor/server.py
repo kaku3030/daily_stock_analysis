@@ -4947,6 +4947,42 @@ def get_primary_market_bundle(count: int = 60):
     return clean_json_value(result_bundle)
 
 
+_BUNDLE_STATUS_TIER_RANK = {
+    "DATA_UNAVAILABLE": 3,
+    "STALE_OR_MISALIGNED": 2,
+    "CURRENTNESS_UNVERIFIED": 1,
+    "OK": 0,
+}
+
+
+def _bundle_status_tier(raw_status):
+    """Classify one already-emitted child status into a bundle-level tier.
+
+    Buckets a value _data_health_check_core (or a bundle completeness check)
+    already produced; computes no freshness judgment of its own. Only OK,
+    STALE_OR_MISALIGNED and CURRENTNESS_UNVERIFIED are passed through as-is
+    -- every other value (DATA_UNAVAILABLE itself, and every core
+    error-shaped status such as SNAPSHOT_ERROR / SNAPSHOT_EMPTY / BAR_ERROR /
+    BAR_EMPTY / UNSUPPORTED_TIMEFRAME / CALENDAR_UNAVAILABLE) is treated as
+    DATA_UNAVAILABLE-tier, fail closed.
+    """
+    if raw_status in ("OK", "STALE_OR_MISALIGNED", "CURRENTNESS_UNVERIFIED"):
+        return raw_status
+    return "DATA_UNAVAILABLE"
+
+
+def _reduce_bundle_status(tiers):
+    """Pure precedence reduction over already-classified bundle tiers.
+
+    DATA_UNAVAILABLE > STALE_OR_MISALIGNED > CURRENTNESS_UNVERIFIED > OK.
+    Selects among values already produced elsewhere; performs no new
+    Currentness calculation and no positive freshness inference.
+    """
+    if not tiers:
+        return "DATA_UNAVAILABLE"
+    return max(tiers, key=_BUNDLE_STATUS_TIER_RANK.get)
+
+
 @mcp.tool()
 def get_primary_market_bundle_health(count: int = 60):
     """Run unified Data Health checks on the primary US market bundle. Read-only.
@@ -5041,17 +5077,28 @@ def get_primary_market_bundle_health(count: int = 60):
             )
             if not components_present:
                 status = "DATA_UNAVAILABLE"
-            elif any(value != "OK" for value in timeframe_statuses.values()):
-                status = "STALE_OR_MISALIGNED"
             else:
-                status = "OK"
+                status = _reduce_bundle_status(
+                    _bundle_status_tier(value)
+                    for value in timeframe_statuses.values()
+                )
 
             reason_codes = []
             if not quote_ok:
                 reason_codes.append("QUOTE_UNAVAILABLE")
             for timeframe_name, entry in timeframe_authority.items():
-                if entry.get("status") != "OK":
-                    reason_codes.extend(entry.get("reason_codes", []))
+                entry_status = entry.get("status")
+                if entry_status != "OK":
+                    entry_reason_codes = entry.get("reason_codes") or []
+                    if entry_reason_codes:
+                        reason_codes.extend(entry_reason_codes)
+                    else:
+                        # Core error-shaped statuses (SNAPSHOT_ERROR,
+                        # SNAPSHOT_EMPTY, BAR_ERROR, BAR_EMPTY,
+                        # UNSUPPORTED_TIMEFRAME) carry no native reason_codes;
+                        # fall back to the raw status itself so the
+                        # aggregation cause is never silently lost.
+                        reason_codes.append(entry_status)
             reason_codes = sorted(set(reason_codes))
 
             statuses.append(status)
@@ -5074,14 +5121,7 @@ def get_primary_market_bundle_health(count: int = 60):
     finally:
         q.close()
 
-    if not statuses:
-        overall_status = "DATA_UNAVAILABLE"
-    elif all(value == "OK" for value in statuses):
-        overall_status = "OK"
-    elif any(value == "DATA_UNAVAILABLE" for value in statuses):
-        overall_status = "DATA_UNAVAILABLE"
-    else:
-        overall_status = "STALE_OR_MISALIGNED"
+    overall_status = _reduce_bundle_status(statuses)
 
     return {
         "ok": True,
