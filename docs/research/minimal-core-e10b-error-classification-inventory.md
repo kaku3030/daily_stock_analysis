@@ -1,4 +1,4 @@
-# Minimal Core E10-B — Provider Failure-Surface Inventory
+# Minimal Core E10-B/C — Provider Failure-Surface Inventory + Differential
 
 **Mode:** Research / Shadow  
 **Production behavior change:** none  
@@ -8,18 +8,15 @@
 
 The repository does **not** currently have one uniform provider failure model. It has at least three materially different surfaces:
 
-1. **Explicit classifier + preserved detail** — Efinance / AkShare.
+1. **Explicit classifier + detail** — Efinance / AkShare.
 2. **Broad exception wrapping into `DataFetchError`** — YFinance / Finnhub / AlphaVantage-style daily paths.
-3. **Fail-soft return values** — several Futu methods return `None`, `[]`, or empty `DataFrame` after logging provider-native failures.
+3. **Fail-soft return values / SDK results** — several Futu methods return `None`, `[]`, or empty `DataFrame` after logging provider-native failures.
 
-Therefore the first Minimal Core deletion candidate is **not** “replace every provider error path with one framework”.
+A broad common error framework remains **LARGER / REJECT**.
 
-The narrower candidate is:
+A narrow Efinance/AkShare shared transport helper is still worth studying, but E10-C proves that the two current classifiers are **not fully equivalent**. Therefore direct deduplication is **not yet a safe DELETE**.
 
-> share only a tiny pure transport-failure classifier where the existing semantics are already demonstrably identical; leave control-flow policy and provider-native result semantics where they are.
-
-`net_complexity_result` for a broad common error framework: **LARGER / REJECT**.  
-`net_complexity_result` for a tiny shared Efinance/AkShare classifier: **UNKNOWN pending differential**.
+`net_complexity_result` for a tiny shared classifier: **UNKNOWN / SHADOW MORE**.
 
 ---
 
@@ -33,31 +30,29 @@ The narrower candidate is:
 - `unwrap_exception()`
 - `summarize_exception()`
 
-This is important: a future Minimal Core change should not introduce a second exception hierarchy just to obtain typed diagnostics.
+Do not introduce a second exception hierarchy merely to obtain typed diagnostics.
 
-Any shared failure-kind representation should either remain a pure diagnostic value or reuse the existing application error surface.
+A future shared failure-kind helper, if justified, should be a pure diagnostic primitive and must not become a second provider-health or retry owner.
 
 ---
 
 ## 3. Inventory matrix
 
-| Surface | Current behavior | Classification shape | Native detail | Policy coupling | Initial decision |
-| --- | --- | --- | --- | --- | --- |
-| Efinance Eastmoney | `_classify_eastmoney_error()` returns stable category + detail | keyword/type ladder | yes | caller owns retry/fallback | **MERGE CANDIDATE** with AkShare only |
-| AkShare Sina/Tencent realtime | `_classify_realtime_http_error()` returns same narrow categories | keyword/type ladder | yes | separate transient retry/source fallback exists elsewhere | **MERGE CANDIDATE** with Efinance only |
-| YFinance daily | catches broad `Exception`, rethrows `DataFetchError(... ) from e` | wrapper, no category enum | cause preserved | Tenacity decorator exists outside body | **KEEP / E03 AUDIT** |
-| Finnhub daily | catches broad HTTP exception and wraps `DataFetchError`; no-data also `DataFetchError` | message-level distinction | cause preserved for HTTP | no shared retry classifier | **KEEP LOCAL** until need proven |
-| AlphaVantage daily | wraps HTTP failure; separately encodes rate-limit/API/no-data in `DataFetchError` messages | provider payload semantics | partly | provider-specific API body | **KEEP LOCAL** |
-| Tencent direct daily | `requests.raise_for_status()` propagates; empty/incomplete history becomes empty frame | no local taxonomy | native exception | manager fallback decides later | **KEEP LOCAL** |
-| Futu HK paths | many calls log exception or non-RET_OK and return `None`/`[]`/empty frame | result-state / fail-soft | log only | availability/context semantics provider-specific | **KEEP / SEPARATE GOVERNANCE** |
-
-This matrix is intentionally about **failure surface**, not whether a provider is “good” or “bad”.
+| Surface | Current behavior | Classification shape | Policy coupling | Decision |
+| --- | --- | --- | --- | --- |
+| Efinance Eastmoney | category + native detail | keyword/type ladder | caller owns retry/fallback | **SHADOW MORE** |
+| AkShare Sina/Tencent realtime | same broad category vocabulary, but not identical edge semantics | keyword/type ladder | separate retry/source fallback | **SHADOW MORE** |
+| YFinance daily | broad catch -> `DataFetchError(... ) from e` | wrapper | Tenacity decorator outside body | **KEEP / E03 AUDIT** |
+| Finnhub daily | HTTP wrapper + separate no-data response semantics | provider-specific | local | **KEEP LOCAL** |
+| AlphaVantage daily | HTTP wrapper + JSON body rate-limit/API/no-data semantics | provider-specific | local | **KEEP LOCAL** |
+| Tencent direct daily | native `raise_for_status`; empty/incomplete history -> empty frame | no local taxonomy | manager fallback later | **KEEP LOCAL** |
+| Futu HK paths | SDK result/fail-soft `None`/`[]`/empty frame | provider SDK semantics | availability/context | **KEEP / SEPARATE GOVERNANCE** |
 
 ---
 
-## 4. Confirmed duplication seam: Efinance ↔ AkShare
+## 4. E10-C differential result — common core exists, exact equivalence does not
 
-The current E10-A Shadow test proves a narrow common category set for representative errors:
+The expanded Shadow corpus confirms a shared category surface for representative cases:
 
 ```text
 remote_disconnect
@@ -67,157 +62,127 @@ request_error
 unknown_request_error
 ```
 
-Both existing classifiers also preserve native detail text.
+Shared examples currently agree for:
 
-### Candidate deletion
+- `RemoteDisconnected` text;
+- `ProtocolError` / connection-broken text;
+- `Timeout`, `ReadTimeout`, `ConnectTimeout`;
+- HTTP 403/forbidden;
+- HTTP 429/too-many-requests;
+- Chinese frequency-limit text;
+- generic `RequestException`;
+- ordinary unknown exception.
 
-If broader differential evidence stays green, the following duplicated material is a legitimate DELETE candidate:
+However two current divergences are now permanently recorded in `tests/test_minimal_core_e10_failure_taxonomy_evidence.py`.
+
+### Divergence A — `ChunkedEncodingError`
+
+AkShare explicitly includes `chunkedencodingerror` in its remote-disconnect keyword set.
+
+Current result:
 
 ```text
-remote_disconnect_keywords
-timeout_keywords
-rate_limit_keywords
-same type/keyword branch ladder
+Efinance -> request_error
+AkShare  -> remote_disconnect
 ```
 
-The desired replacement is a **small pure helper**, not an error subsystem.
+Therefore the previous shorthand “identical branch ladder” was too strong and is superseded by this document.
 
-### Hard boundary
+### Divergence B — empty exception detail
 
-The helper must not know:
+For `ValueError("")` both classify as `unknown_request_error`, but diagnostic detail differs:
 
 ```text
-attempt count
-backoff
-provider fallback order
-circuit breaker
-cooldown
-provider admission
-entitlement
-currentness
-delivery
+Efinance -> ""
+AkShare  -> "ValueError"
 ```
 
-If those concepts enter the helper, the simplification has failed.
+This matters because Minimal Core must not silently degrade or rewrite native diagnostic evidence.
 
 ---
 
-## 5. Important non-duplication: provider API semantics
+## 5. Revised deletion candidate
+
+The candidate is no longer “delete one classifier and call the other”.
+
+The only safe next candidate is:
+
+> build a tiny **Shadow** pure classifier that explicitly chooses governed edge semantics, then differential-test every existing call site before considering production deletion.
+
+A production consolidation would need an explicit decision for `ChunkedEncodingError` and empty-detail normalization. That decision would be a semantic change for at least one provider unless the helper preserves provider-local override behavior—which may erase the complexity win.
+
+If provider overrides/hooks are required, default decision becomes **KEEP LOCAL**.
+
+---
+
+## 6. Provider-native semantics stay local
 
 ### AlphaVantage
 
-The API can return HTTP success while the JSON body communicates:
+HTTP success can still carry provider failure in JSON:
 
-- rate-limit (`Note`)
-- API error (`Error Message`)
-- no time-series data
+- `Note` -> rate limit;
+- `Error Message` -> provider API error;
+- missing time-series -> no data.
 
-These are not equivalent to generic transport keyword classification. A generic HTTP classifier cannot replace these branches without losing provider semantics.
+A generic transport classifier cannot replace these branches.
 
 ### Finnhub
 
-The daily path distinguishes request failure from a response whose `s != ok` or whose candle array is empty. Again, transport and data-unavailable semantics are separate.
+Request failure is different from a response whose `s != ok` or whose candle array is empty.
 
 ### Futu
 
-Futu uses SDK return codes/data emptiness and provider context state rather than normal HTTP exceptions. Entitlement/subscription semantics may also arrive through provider-specific channels. Mapping every Futu failure to a generic transport taxonomy would be semantic loss.
+SDK return codes, context availability, data emptiness and entitlement/subscription semantics are not ordinary HTTP transport errors.
 
-**Decision:** keep provider-native semantic interpretation adapter-local.
-
----
-
-## 6. YFinance retry-surface finding
-
-`YfinanceFetcher._fetch_raw_data()` is decorated to retry `ConnectionError` / `TimeoutError`, but the function body catches generic `Exception` and wraps non-`DataFetchError` failures in `DataFetchError` before they leave the body.
-
-This creates a structural question for E03:
-
-> does the Tenacity retry predicate ever observe the original transport exception on the ordinary wrapped path?
-
-Do **not** “fix” this under E10. It belongs in Retry/Fallback semantics because changing the exception surface may change call count and provider fallback behavior.
-
-Recommended next evidence:
-
-```text
-synthetic ConnectionError from yf.download
--> count calls
--> observe exception type at decorator boundary
--> compare decorated vs undecorated behavior
-```
-
-Until that test exists: **KEEP / UNKNOWN**.
+**Decision:** provider-native semantic interpretation remains adapter-local.
 
 ---
 
-## 7. Candidate failure-kind vocabulary
+## 7. YFinance retry-surface evidence moved to E03-B
 
-The broader vocabulary below remains research-only:
+`YfinanceFetcher._fetch_raw_data()` is decorated to retry `ConnectionError` / `TimeoutError`, but the ordinary body catches generic `Exception` and wraps it in `DataFetchError` before it escapes.
 
-```text
-TRANSIENT_TIMEOUT
-REMOTE_DISCONNECT
-RATE_LIMIT
-AUTH
-ENTITLEMENT
-PROTOCOL
-CONTRACT
-UNSUPPORTED
-DATA_UNAVAILABLE
-UNKNOWN
-```
+`tests/test_minimal_core_e03_yfinance_retry_surface.py` now pins a synthetic `ConnectionError` path with **one** observed `yf.download()` call.
 
-E10-B does **not** prove that all providers should emit all of these.
-
-A provider-neutral classifier is justified only for the subset whose inputs and outputs are actually shared.
+This is a Retry/Fallback question, not an E10 classification fix.
 
 ---
 
-## 8. Promotion test plan
+## 8. Promotion gate
 
-Before deleting the Efinance/AkShare duplicate ladder:
+Before deleting either Efinance/AkShare local classifier:
 
-1. run current classifiers and a Shadow pure classifier against a larger corpus;
-2. include exception subclasses plus keyword-only errors;
-3. preserve native error type + message;
-4. assert `UNKNOWN` remains explicit;
-5. prove retry count/fallback/cooldown state is unchanged;
-6. measure duplicated branch reduction and Agent read-set delta;
-7. reject if the shared helper requires provider registration/hooks.
-
-Suggested corpus additions:
-
-```text
-ChunkedEncodingError
-ProtocolError text
-ReadTimeout / ConnectTimeout
-403 / forbidden
-429 / too many requests
-non-English anti-bot text
-empty exception message
-nested exception cause
-provider-specific API semantic error (must stay local)
-```
+1. define the intended behavior for every currently divergent case;
+2. compare existing vs Shadow category, native type and detail;
+3. prove retry/fallback/cooldown/routing call counts are unchanged;
+4. keep provider API-body/SDK semantics outside the helper;
+5. keep `UNKNOWN` explicit;
+6. measure duplicated branch/read-set reduction;
+7. reject plugin hooks/registries unless they still make the net system smaller;
+8. require negative/adversarial tests and rollback;
+9. require `net_complexity_result = SMALLER`.
 
 ---
 
-## 9. Delete-first conclusion
+## 9. Current decision
 
-### Likely DELETE
+### SHADOW MORE
 
-- duplicated Efinance/AkShare transport keyword tuples and identical branch ladder, **only after E10-C/D differential passes**.
+- Efinance/AkShare transport classification has a real shared core, but not exact equivalence.
 
 ### KEEP
 
 - provider API-body interpretation;
 - Futu SDK result semantics;
-- existing application-level `DataFetchError` hierarchy;
+- existing `DataFetchError` hierarchy;
 - retry/fallback/cooldown ownership;
-- causal/native diagnostic evidence.
+- native diagnostic evidence.
 
 ### REJECT
 
-- plugin-based error registry;
-- a second provider health state machine;
-- a universal exception wrapper that turns `AUTH`, `ENTITLEMENT`, `DATA_UNAVAILABLE`, or `UNKNOWN` into generic transient failure.
+- universal provider error framework;
+- second provider health state machine;
+- generic transient wrapper that collapses `AUTH`, `ENTITLEMENT`, `DATA_UNAVAILABLE`, or `UNKNOWN`.
 
-The Minimal Core target is one tiny repeated classifier removed, not a new error architecture.
+Minimal Core succeeded here by finding a **counterexample before deletion**. Avoiding a wrong abstraction is itself a complexity reduction.
