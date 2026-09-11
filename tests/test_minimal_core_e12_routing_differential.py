@@ -18,9 +18,8 @@ from data_provider.base import (
     _is_kr_market,
     _is_tw_market,
     _market_tag,
-    is_us_index_code,
-    is_us_stock_code,
 )
+from data_provider.us_index_mapping import is_us_index_code, is_us_stock_code
 from src.services.market_symbol_utils import get_suffix_market
 
 
