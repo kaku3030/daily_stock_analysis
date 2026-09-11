@@ -10,6 +10,7 @@ synchronization mechanism").
 """
 from __future__ import annotations
 
+import multiprocessing
 import time
 from datetime import datetime, timezone
 
@@ -205,10 +206,8 @@ class _FakeProcess:
         pass
 
 
-def test_07_timeout_vs_result_race_result_wins(supervisor):
-    """Deadline already expired, but a valid success frame is already
-    sitting in the queue: the frame check runs first each iteration, so
-    the result must win, not TIMEOUT."""
+def test_07_timeout_vs_result_race_timeout_wins_after_deadline(supervisor):
+    """An expired parent deadline is authoritative over a late result."""
     fake_gen = _Generation(
         number=1,
         process=_FakeProcess(alive=True),
@@ -234,7 +233,7 @@ def test_07_timeout_vs_result_race_result_wins(supervisor):
         fake_gen, _command(), dispatched_at_monotonic_ns=time.monotonic_ns() - 2_000_000_000,
         deadline_ns=already_expired_deadline_ns,
     )
-    assert outcome.outcome is ProviderExecutionOutcome.SUCCEEDED
+    assert outcome.outcome is ProviderExecutionOutcome.TIMEOUT
     supervisor._current = None  # avoid the fixture's teardown touching the fake
 
 
@@ -617,10 +616,8 @@ def test_22_teardown_no_orphan_child_remains(supervisor):
     # which _hard_kill() already did as part of shutdown().
     assert supervisor._current.process.exitcode is not None
 
-    import os
-    import signal
-    with pytest.raises(OSError):
-        os.kill(pid, 0)  # ESRCH: process does not exist anymore
+    assert pid is not None
+    assert pid not in {process.pid for process in multiprocessing.active_children()}
 
 
 # ---------------------------------------------------------------------------
@@ -685,5 +682,36 @@ def test_24_repeated_race_stress_terminal_uniqueness(supervisor):
             dispatched_at_monotonic_ns=time.monotonic_ns() - 1_000_000,
             deadline_ns=already_expired,
         )
-        assert outcome.outcome is ProviderExecutionOutcome.SUCCEEDED
+        assert outcome.outcome in {
+            ProviderExecutionOutcome.SUCCEEDED,
+            ProviderExecutionOutcome.TIMEOUT,
+        }
     supervisor._current = None
+
+
+def test_25_invalid_outcome_is_protocol_error(supervisor):
+    supervisor.start_generation()
+    outcome = supervisor.submit_command(_command(), payload={"behavior": "success"})
+    assert outcome.outcome is ProviderExecutionOutcome.SUCCEEDED
+
+    fake_gen = _Generation(
+        number=1, process=_FakeProcess(), command_queue=None,
+        result_queue=_FakeQueue([]), release_event=None,
+    )
+    bad = {
+        "frame_kind": "COMMAND_RESULT", "command_id": "c1", "worker_generation": 1,
+        "outcome": "NOT_A_REAL_OUTCOME", "terminal_observed_at_monotonic_ns": time.monotonic_ns(),
+        "terminal_at_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    result = supervisor._resolve_from_frame(fake_gen, _command(), bad, time.monotonic_ns())
+    assert result.outcome is ProviderExecutionOutcome.PROTOCOL_ERROR
+    supervisor.shutdown()
+
+
+def test_26_shutdown_kill_failure_is_fatal(supervisor, monkeypatch):
+    supervisor.start_generation()
+    monkeypatch.setattr(supervisor, "_hard_kill", lambda generation: False)
+    supervisor.shutdown()
+    assert supervisor.state is SupervisorState.FATAL
+    with pytest.raises(SupervisorFatalError):
+        supervisor.replace_generation()

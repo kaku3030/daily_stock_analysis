@@ -275,6 +275,7 @@ class _Generation:
     release_event: "multiprocessing.synchronize.Event"
     ready: bool = False
     dead: bool = False
+    invalid: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -311,13 +312,15 @@ class ProviderWorkerSupervisor:
         self._child_target = child_target or _fake_child_main
         self._ctx = multiprocessing.get_context("spawn")
 
-        self._admission_lock = threading.Lock()
+        self._admission_lock = threading.RLock()
+        self._state_lock = threading.RLock()
         self._state = SupervisorState.CREATED
         self._shutdown_event = threading.Event()
         self._generation_seq = 0
         self._current: _Generation | None = None
         self._in_flight_command_id: str | None = None
         self._evidence_log: list[ProviderWorkerLifecycleEvidence] = []
+        self._terminal_ledger: dict[str, ResolvedProviderCommandOutcome] = {}
 
     # -- introspection -----------------------------------------------------
 
@@ -447,17 +450,24 @@ class ProviderWorkerSupervisor:
                 )
 
             if frame.get("frame_kind") == "LIFECYCLE" and frame.get("kind") == ProviderWorkerEvidenceKind.WORKER_INIT_FAILED.value:
-                generation.dead = True
+                death_confirmed = self._hard_kill(generation)
+                if not death_confirmed:
+                    self._state = SupervisorState.FATAL
+                    kind = ProviderWorkerEvidenceKind.WORKER_KILL_FAILED
+                    reason = "worker init failed; child death could not be confirmed"
+                else:
+                    kind = ProviderWorkerEvidenceKind.WORKER_INIT_FAILED
+                    reason = frame.get("diagnostic_reason")
                 return ProviderWorkerLifecycleEvidence(
                     runtime_instance_id=self._runtime_instance_id,
                     provider_id=self._provider_id,
                     worker_generation=generation.number,
-                    kind=ProviderWorkerEvidenceKind.WORKER_INIT_FAILED,
+                    kind=kind,
                     observed_at_monotonic_ns=time.monotonic_ns(),
                     observed_at_utc=datetime.now(timezone.utc),
                     process_pid=generation.process.pid,
-                    exit_code=None,
-                    diagnostic_reason=frame.get("diagnostic_reason"),
+                    exit_code=generation.process.exitcode,
+                    diagnostic_reason=reason,
                 )
             # Anything else during startup is ignored as noise, not
             # authoritative (defensive only; the fake child never emits
@@ -521,17 +531,23 @@ class ProviderWorkerSupervisor:
         return len(encoded.encode("utf-8")) <= self._config.max_frame_bytes
 
     def _handle_protocol_failure(self, generation: _Generation, frame: Any) -> ProviderWorkerLifecycleEvidence:
-        self._hard_kill(generation)
+        if not self._hard_kill(generation):
+            self._state = SupervisorState.FATAL
+            kind = ProviderWorkerEvidenceKind.WORKER_KILL_FAILED
+            reason = "protocol failure; child death could not be confirmed"
+        else:
+            kind = ProviderWorkerEvidenceKind.WORKER_PROTOCOL_FATAL
+            reason = "malformed or oversized frame received from child"
         return ProviderWorkerLifecycleEvidence(
             runtime_instance_id=self._runtime_instance_id,
             provider_id=self._provider_id,
             worker_generation=generation.number,
-            kind=ProviderWorkerEvidenceKind.WORKER_PROTOCOL_FATAL,
+            kind=kind,
             observed_at_monotonic_ns=time.monotonic_ns(),
             observed_at_utc=datetime.now(timezone.utc),
             process_pid=generation.process.pid,
             exit_code=None,
-            diagnostic_reason="malformed or oversized frame received from child",
+            diagnostic_reason=reason,
         )
 
     # -- hard kill / death confirmation --------------------------------
@@ -541,21 +557,37 @@ class ProviderWorkerSupervisor:
         death. Returns True iff death was confirmed."""
         if not generation.process.is_alive():
             generation.dead = True
+            generation.invalid = True
+            self._dispose_ipc(generation)
             return True
 
         generation.process.terminate()
         generation.process.join(self._config.terminate_join_timeout_seconds)
         if self._confirm_process_death(generation):
             generation.dead = True
+            generation.invalid = True
+            self._dispose_ipc(generation)
             return True
 
         generation.process.kill()
         generation.process.join(self._config.kill_join_timeout_seconds)
         if self._confirm_process_death(generation):
             generation.dead = True
+            generation.invalid = True
+            self._dispose_ipc(generation)
             return True
 
         return False
+
+    @staticmethod
+    def _dispose_ipc(generation: _Generation) -> None:
+        for channel in (generation.command_queue, generation.result_queue):
+            close = getattr(channel, "close", None)
+            if close is not None:
+                try:
+                    close()
+                except (OSError, ValueError):
+                    pass
 
     def _confirm_process_death(self, generation: _Generation) -> bool:
         """Positive death confirmation seam. Overridable/monkeypatchable
@@ -575,6 +607,9 @@ class ProviderWorkerSupervisor:
             raise ValueError("command must be a ProviderCommand")
 
         with self._admission_lock:
+            existing = self._terminal_ledger.get(command.command_id)
+            if existing is not None:
+                return existing
             if self._state is SupervisorState.FATAL:
                 raise SupervisorFatalError("supervisor is FATAL; no commands accepted")
             if self._state is SupervisorState.SHUTDOWN:
@@ -589,22 +624,46 @@ class ProviderWorkerSupervisor:
             self._in_flight_command_id = command.command_id
             generation = self._current
 
+            self._before_dispatch()
+            if self._shutdown_event.is_set():
+                outcome = self._finalize_command(
+                    generation, command, ProviderExecutionOutcome.CANCELLED_SHUTDOWN,
+                    None, diagnostic_reason="shutdown requested before dispatch",
+                )
+                self._terminal_ledger[command.command_id] = outcome
+                self._in_flight_command_id = None
+                return outcome
+
         dispatched_at_monotonic_ns = time.monotonic_ns()
         wire_command = {
             "command_id": command.command_id,
             "command_type": command.command_type.value,
             "payload": dict(payload or {}),
         }
-        generation.command_queue.put(wire_command)
-
         timeout_seconds = self._config.command_timeout_seconds[command.command_type]
+        try:
+            generation.command_queue.put(wire_command, timeout=timeout_seconds)
+        except (_queue_module.Full, OSError, ValueError):
+            outcome = self._finalize_command(
+                generation, command, ProviderExecutionOutcome.PROTOCOL_ERROR,
+                None, diagnostic_reason="bounded command admission failed",
+            )
+            with self._admission_lock:
+                self._terminal_ledger[command.command_id] = outcome
+                self._in_flight_command_id = None
+            return outcome
         deadline_ns = dispatched_at_monotonic_ns + int(timeout_seconds * 1_000_000_000)
 
         outcome = self._await_command_resolution(
             generation, command, dispatched_at_monotonic_ns, deadline_ns
         )
-        self._in_flight_command_id = None
+        with self._admission_lock:
+            self._terminal_ledger[command.command_id] = outcome
+            self._in_flight_command_id = None
         return outcome
+
+    def _before_dispatch(self) -> None:
+        """Deterministic seam for the admission/dispatch shutdown race."""
 
     def _await_command_resolution(
         self,
@@ -614,9 +673,15 @@ class ProviderWorkerSupervisor:
         deadline_ns: int,
     ) -> ResolvedProviderCommandOutcome:
         while True:
-            # 1) A result frame always wins the race if it is already
-            #    available -- checked first, every iteration.
             remaining_ns = deadline_ns - time.monotonic_ns()
+            if remaining_ns <= 0:
+                death_confirmed = self._hard_kill(generation)
+                if not death_confirmed:
+                    self._state = SupervisorState.FATAL
+                    raise SupervisorFatalError("command timeout escalation could not confirm child death")
+                return self._finalize_command(generation, command, ProviderExecutionOutcome.TIMEOUT,
+                    dispatched_at_monotonic_ns, diagnostic_reason="command deadline exceeded")
+            # Parent deadline is authoritative; inspect frames only while valid.
             poll_timeout_s = min(0.02, max(remaining_ns, 0) / 1_000_000_000) if remaining_ns > 0 else 0.0
             try:
                 frame = generation.result_queue.get(timeout=poll_timeout_s)
@@ -653,22 +718,6 @@ class ProviderWorkerSupervisor:
                     diagnostic_reason=f"child exited unexpectedly (code={generation.process.exitcode})",
                 )
 
-            # 4) Deadline.
-            if time.monotonic_ns() >= deadline_ns:
-                death_confirmed = self._hard_kill(generation)
-                if not death_confirmed:
-                    self._state = SupervisorState.FATAL
-                    raise SupervisorFatalError(
-                        "command timeout escalation could not confirm child death; "
-                        "supervisor is now FATAL, no replacement may be created"
-                    )
-                return self._finalize_command(
-                    generation,
-                    command,
-                    ProviderExecutionOutcome.TIMEOUT,
-                    dispatched_at_monotonic_ns,
-                    diagnostic_reason="command deadline exceeded; child terminated and death confirmed",
-                )
 
     def _resolve_from_frame(
         self,
@@ -700,8 +749,14 @@ class ProviderWorkerSupervisor:
             # kept as a defense-in-depth identity check.
             return None
 
-        outcome = ProviderExecutionOutcome(frame["outcome"])
-        return self._finalize_command(
+        try:
+            outcome = ProviderExecutionOutcome(frame["outcome"])
+        except (KeyError, ValueError, TypeError):
+            evidence = self._handle_protocol_failure(generation, frame)
+            self._record_evidence(evidence)
+            return self._finalize_command(generation, command, ProviderExecutionOutcome.PROTOCOL_ERROR,
+                dispatched_at_monotonic_ns, diagnostic_reason="invalid command outcome")
+        resolved = self._finalize_command(
             generation,
             command,
             outcome,
@@ -711,6 +766,12 @@ class ProviderWorkerSupervisor:
             normalized_provider_payload=frame.get("normalized_provider_payload"),
             diagnostic_reason=frame.get("diagnostic_reason"),
         )
+        if outcome is ProviderExecutionOutcome.PROVIDER_EXCEPTION:
+            if not self._hard_kill(generation):
+                self._state = SupervisorState.FATAL
+            else:
+                generation.invalid = True
+        return resolved
 
     def _finalize_command(
         self,
@@ -776,7 +837,8 @@ class ProviderWorkerSupervisor:
         if generation is None or generation.dead:
             return
 
-        self._hard_kill(generation)
+        if not self._hard_kill(generation):
+            self._state = SupervisorState.FATAL
 
     def replace_generation(self) -> ProviderWorkerLifecycleEvidence:
         """Create a fresh generation after the current one is confirmed
