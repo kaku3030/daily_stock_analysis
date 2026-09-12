@@ -129,6 +129,42 @@ def test_03_ordinary_command_success(supervisor):
     assert outcome.worker_generation == supervisor.worker_generation
 
 
+def test_terminalizes_command_when_no_generation_was_established(supervisor):
+    command = _command("never-started")
+    outcome = supervisor.submit_command(command)
+
+    assert outcome.outcome is ProviderExecutionOutcome.CANCELLED_GENERATION_INVALIDATED
+    assert outcome.worker_generation is None
+    assert outcome.dispatched_at_monotonic_ns is None
+    assert outcome.diagnostic_reason == "no worker generation has ever been established for dispatch"
+    assert supervisor._generation_seq == 0
+    assert supervisor.submit_command(command) is outcome
+
+
+def test_terminalizes_command_for_dead_real_generation_without_replacement(supervisor):
+    supervisor.start_generation()
+    generation = supervisor._current
+    number = generation.number
+    assert supervisor._hard_kill(generation)
+
+    outcome = supervisor.submit_command(_command("dead-generation"))
+
+    assert outcome.outcome is ProviderExecutionOutcome.CANCELLED_GENERATION_INVALIDATED
+    assert outcome.worker_generation == number
+    assert outcome.dispatched_at_monotonic_ns is None
+    assert outcome.diagnostic_reason == (
+        "previously minted worker generation is no longer usable before dispatch"
+    )
+    assert supervisor._generation_seq == number
+    assert supervisor.submit_command(_command("dead-generation")) is outcome
+
+
+def test_terminal_closure_preserves_command_identity_collision(supervisor):
+    supervisor.submit_command(_command("collision", desired_registry_revision=1))
+    with pytest.raises(ValueError, match="command_id collision"):
+        supervisor.submit_command(_command("collision", desired_registry_revision=2))
+
+
 # ---------------------------------------------------------------------------
 # 4. provider-style rejection result
 # ---------------------------------------------------------------------------
