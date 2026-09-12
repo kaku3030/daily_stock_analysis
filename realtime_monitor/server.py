@@ -5623,27 +5623,30 @@ def _expected_latest_trading_date(now_et, trading_days):
     return candidates[-1] if candidates else None
 
 
+_US_RTH_COMPLETED_BAR_ENDS = {
+    "15m": (time(9, 45), time(10, 0), time(10, 15), time(10, 30),
+            time(10, 45), time(11, 0), time(11, 15), time(11, 30),
+            time(11, 45), time(12, 0), time(12, 15), time(12, 30),
+            time(12, 45), time(13, 0), time(13, 15), time(13, 30),
+            time(13, 45), time(14, 0), time(14, 15), time(14, 30),
+            time(14, 45), time(15, 0), time(15, 15), time(15, 30),
+            time(15, 45), time(16, 0)),
+    "60m": (time(10, 30), time(11, 30), time(12, 30), time(13, 30),
+            time(14, 30), time(15, 30), time(16, 0)),
+    "1h": (time(10, 30), time(11, 30), time(12, 30), time(13, 30),
+           time(14, 30), time(15, 30), time(16, 0)),
+}
+
+
 def expected_completed_bar_end(now_et, timeframe):
     """Return the latest completed normal-US-RTH bar-end time, or None."""
     phase = _us_session_phase(now_et)
     if phase not in ("REGULAR", "AFTER_HOURS"):
         return None
-    grids = {
-        "15m": (time(9, 45), time(10, 0), time(10, 15), time(10, 30),
-                time(10, 45), time(11, 0), time(11, 15), time(11, 30),
-                time(11, 45), time(12, 0), time(12, 15), time(12, 30),
-                time(12, 45), time(13, 0), time(13, 15), time(13, 30),
-                time(13, 45), time(14, 0), time(14, 15), time(14, 30),
-                time(14, 45), time(15, 0), time(15, 15), time(15, 30),
-                time(15, 45), time(16, 0)),
-        "60m": (time(10, 30), time(11, 30), time(12, 30), time(13, 30),
-                time(14, 30), time(15, 30), time(16, 0)),
-        "1h": (time(10, 30), time(11, 30), time(12, 30), time(13, 30),
-               time(14, 30), time(15, 30), time(16, 0)),
-    }.get(timeframe)
-    if not grids:
+    grid = _US_RTH_COMPLETED_BAR_ENDS.get(timeframe)
+    if not grid:
         return None
-    completed = [value for value in grids if value <= now_et.time()]
+    completed = [value for value in grid if value <= now_et.time()]
     return completed[-1] if completed else None
 
 
@@ -5808,28 +5811,36 @@ def _data_health_check_core(q, symbol, timeframe, now_et=None,
         if timeframe in ("day", "1d"):
             status = "OK"
             reasons = ["LATEST_BAR_MATCHES_EXPECTED_SESSION"]
-        elif timeframe in ("15m", "60m", "1h") and trading_day_map.get(expected_date) == "WHOLE":
-            try:
-                parsed = datetime.strptime(str(latest_bar_time), "%Y-%m-%d %H:%M:%S")
-                expected_end = expected_completed_bar_end(now_et, timeframe)
-            except (TypeError, ValueError):
-                parsed = None
-                expected_end = None
-            if parsed is None:
+        elif timeframe in ("15m", "60m", "1h"):
+            if trading_day_map.get(expected_date) != "WHOLE":
                 status = "CURRENTNESS_UNVERIFIED"
-                reasons = ["TIMESTAMP_FORMAT_OR_PROVENANCE_UNSUPPORTED"]
-            elif parsed.time() not in {
-                value for value in (expected_completed_bar_end(now_et, timeframe),)
-                if value is not None
-            } or expected_end is None:
-                status = "CURRENTNESS_UNVERIFIED"
-                reasons = ["LATEST_BAR_NOT_ON_EXPECTED_COMPLETED_BOUNDARY"]
-            elif parsed.time() == expected_end:
-                status = "OK"
-                reasons = ["LATEST_COMPLETED_BOUNDARY_PROVEN"]
+                reasons = ["UNSUPPORTED_SESSION_SCOPE"]
             else:
-                status = "CURRENTNESS_UNVERIFIED"
-                reasons = ["EXPECTED_COMPLETED_BOUNDARY_NOT_REACHED"]
+                try:
+                    parsed = datetime.strptime(str(latest_bar_time), "%Y-%m-%d %H:%M:%S")
+                    expected_end = expected_completed_bar_end(now_et, timeframe)
+                except (TypeError, ValueError):
+                    parsed = None
+                    expected_end = None
+                grid = _US_RTH_COMPLETED_BAR_ENDS.get(timeframe, ())
+                if parsed is None:
+                    status = "CURRENTNESS_UNVERIFIED"
+                    reasons = ["TIMESTAMP_FORMAT_OR_PROVENANCE_UNSUPPORTED"]
+                elif expected_end is None:
+                    status = "CURRENTNESS_UNVERIFIED"
+                    reasons = ["UNSUPPORTED_SESSION_SCOPE"]
+                elif parsed.time() not in grid:
+                    status = "CURRENTNESS_UNVERIFIED"
+                    reasons = ["TIMESTAMP_OFF_ADMITTED_GRID"]
+                elif parsed.time() == expected_end:
+                    status = "OK"
+                    reasons = ["LATEST_COMPLETED_BOUNDARY_PROVEN"]
+                elif parsed.time() < expected_end:
+                    status = "CURRENTNESS_UNVERIFIED"
+                    reasons = ["EXPECTED_COMPLETED_BOUNDARY_NOT_REACHED"]
+                else:
+                    status = "CURRENTNESS_UNVERIFIED"
+                    reasons = ["PROVIDER_TIMESTAMP_AHEAD_OF_EXPECTED_BOUNDARY"]
         else:
             # Intraday: the latest bar's calendar date matching the expected
             # trading date proves only that the bar belongs to today's
