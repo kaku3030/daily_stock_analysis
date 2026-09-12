@@ -10,6 +10,7 @@ import requests
 from tenacity import RetryError
 
 from data_provider.base import DataFetchError, unwrap_exception
+from data_provider.base import RateLimitError
 from data_provider.efinance_fetcher import EfinanceFetcher
 
 
@@ -64,3 +65,37 @@ def test_e03_non_retryable_semantic_error_is_not_wrapped():
         fetcher._fetch_raw_data("AAPL", "2026-09-01", "2026-09-02")
 
     assert "不支持美股" in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        requests.exceptions.ConnectionError("connection"),
+        TimeoutError("timeout"),
+        requests.exceptions.RequestException("request"),
+        RateLimitError("rate limit"),
+        DataFetchError("provider data failure"),
+    ],
+    ids=["connection", "timeout", "request", "rate-limit", "data-fetch"],
+)
+def test_e03_efinance_action_matrix_is_one_call_and_preserves_root(monkeypatch, failure):
+    fetcher = _fetcher()
+    attempts = 0
+
+    def fail(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        raise failure
+
+    monkeypatch.setattr(fetcher, "_fetch_stock_data", fail)
+    started = __import__("time").monotonic()
+    with pytest.raises(Exception) as caught:
+        fetcher._fetch_raw_data("600519", "2026-09-01", "2026-09-02")
+
+    assert attempts == 1
+    assert __import__("time").monotonic() - started < 1.0
+    if isinstance(failure, (ConnectionError, TimeoutError, requests.exceptions.RequestException)):
+        assert isinstance(caught.value, RetryError)
+        assert unwrap_exception(caught.value) is failure
+    else:
+        assert caught.value is failure

@@ -151,10 +151,11 @@ Historical sync/delta packets remain in `docs/research/cross-project-sync-minima
 
 ```text
 branch: research/minimal-core-initiative-v0-1
-head: 25cbb5af564d58b2fea763b5d586e7a7f30b8be1
-commit: test: fix E12 routing differential imports
+head: de42ff52d0c134960520503f51d7481238df4fc2
+commit: research: compact Minimal Core read-set
 mode: Research / Shadow only
 production runtime: unchanged
 PR #71: open, unmerged
-exact-head checks: CI #221 success; Research Radar Tests #239 success
+exact-head checks: CI #229 success; Research Radar Tests #247 success
+changed-files: CURRENT_COUNT_UNKNOWN (no reliable current metadata recorded)
 ```
