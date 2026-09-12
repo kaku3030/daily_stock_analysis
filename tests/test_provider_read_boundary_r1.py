@@ -90,10 +90,77 @@ def test_b_c_d_e_f_g_errors_remain_terminal_facts(outcome):
 
 
 def test_m_same_request_replays_deterministically_and_identity_differs():
-    a = req(ReadOperation.ACCOUNT_LIST, AccountListParams(), "same")
-    b = req(ReadOperation.ACCOUNT_LIST, AccountListParams(), "same")
-    c = req(ReadOperation.ACCOUNT_LIST, AccountListParams(), "different")
-    assert a == b and a.request_id != c.request_id
+    class ReplayLedger:
+        def __init__(self, worker):
+            self.worker = worker
+            self.entries = {}
+
+        def replay(self, request, **kwargs):
+            identity = (request.runtime_instance_id, request.provider_id,
+                        request.operation, request.params)
+            key = (request.request_id, identity)
+            if any(existing[0] == request.request_id for existing in self.entries) and key not in self.entries:
+                raise ValueError("request_id collision")
+            if key not in self.entries:
+                self.entries[key] = self.worker.replay(request, **kwargs)
+            return self.entries[key]
+
+    worker = FakeReadWorker()
+    ledger = ReplayLedger(worker)
+    original = req(ReadOperation.ACCOUNT_LIST, AccountListParams(), "same")
+    reused = req(ReadOperation.ACCOUNT_LIST, AccountListParams(), "same")
+    changed = req(ReadOperation.POSITION_LIST, PositionListParams("acct"), "same")
+    first = ledger.replay(original, outcome=ProviderExecutionOutcome.SUCCEEDED, payload={"rows": ()})
+    second = ledger.replay(reused, outcome=ProviderExecutionOutcome.SUCCEEDED, payload={"rows": ()})
+    assert second is first
+    assert len(worker.calls) == 1
+    with pytest.raises(ValueError):
+        ledger.replay(changed, outcome=ProviderExecutionOutcome.SUCCEEDED, payload={"rows": ()})
+    assert len(worker.calls) == 1
+
+
+@pytest.mark.parametrize("change", [
+    {"operation": ReadOperation.POSITION_LIST, "params": PositionListParams("acct")},
+    {"params": AccountListParams("OTHER")},
+    {"provider_id": "other"},
+    {"runtime_instance_id": "other"},
+])
+def test_m_same_request_id_identity_collision_fails_closed_before_fake_call(change):
+    class Ledger:
+        def __init__(self, worker):
+            self.worker, self.identity = worker, None
+
+        def replay(self, request):
+            identity = (request.runtime_instance_id, request.provider_id,
+                        request.operation, request.params)
+            if self.identity is None:
+                self.identity = identity
+                return self.worker.replay(request, outcome=ProviderExecutionOutcome.SUCCEEDED)
+            if identity != self.identity:
+                raise ValueError("request_id collision")
+
+    base = req(ReadOperation.ACCOUNT_LIST, AccountListParams(), "same")
+    values = {"runtime_instance_id": base.runtime_instance_id,
+              "provider_id": base.provider_id, "operation": base.operation,
+              "params": base.params, **change}
+    candidate = ProviderReadRequest(values["runtime_instance_id"], values["provider_id"],
+                                    base.request_id, values["operation"], base.created_at_utc,
+                                    values["params"])
+    worker = FakeReadWorker()
+    ledger = Ledger(worker)
+    ledger.replay(base)
+    with pytest.raises(ValueError):
+        ledger.replay(candidate)
+    assert len(worker.calls) == 1
+
+
+def test_h_old_worker_generation_is_preserved_as_execution_fact():
+    current_generation = 8
+    outcome = FakeReadWorker().replay(
+        req(ReadOperation.ACCOUNT_LIST, AccountListParams()),
+        ProviderExecutionOutcome.SUCCEEDED, generation=7)
+    assert current_generation == 8
+    assert outcome.worker_generation == 7
 
 
 def test_n_allowlist_rejects_before_fake_provider_call():
