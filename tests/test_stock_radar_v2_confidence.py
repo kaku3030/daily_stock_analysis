@@ -17,19 +17,26 @@ def _portfolio_components(score: float) -> dict[str, float]:
 
 
 @pytest.mark.parametrize(
-    ("score", "level", "gate"),
+    ("score", "level"),
     [
-        (80, "L0", "ALLOW_RESEARCH_FLOW"),
-        (60, "L1", "WATCH_PORTFOLIO_RISK"),
-        (40, "L2", "RESTRICT_NEW_POSITION"),
-        (39.99, "L3", "BLOCK_NEW_POSITION"),
+        (80, "L0"),
+        (60, "L1"),
+        (40, "L2"),
+        (39.99, "L3"),
     ],
 )
-def test_portfolio_confidence_levels_and_l3_gate(score, level, gate) -> None:
+def test_portfolio_confidence_levels_are_diagnostic(score, level) -> None:
     result = assess_portfolio_confidence(_portfolio_components(score))
     assert result.portfolio_confidence == score
     assert result.level == level
-    assert result.risk_gate == gate
+    assert result.risk_gate == "DIAGNOSTIC_ONLY"
+
+
+def test_portfolio_score_cannot_grant_or_restrict_permission() -> None:
+    high = assess_portfolio_confidence(_portfolio_components(100))
+    low = assess_portfolio_confidence(_portfolio_components(0))
+
+    assert high.risk_gate == low.risk_gate == "DIAGNOSTIC_ONLY"
 
 
 def test_portfolio_risk_does_not_mutate_signal_state_or_confidence() -> None:
@@ -43,7 +50,7 @@ def test_portfolio_risk_does_not_mutate_signal_state_or_confidence() -> None:
     )
 
     assert signal == before
-    assert portfolio.risk_gate == "BLOCK_NEW_POSITION"
+    assert portfolio.risk_gate == "DIAGNOSTIC_ONLY"
     assert [event.event_type for event in events] == ["portfolio_risk_alert"]
 
 
