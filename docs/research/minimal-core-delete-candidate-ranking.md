@@ -1,17 +1,17 @@
 # Minimal Core — Production DELETE Candidate Ranking
 
 **Mode:** Research / Shadow  
-**Exact head under test:** `6b1ad363c1c65fc075e3ac7f3df1fd5c77902d23`
+**Exact head under test:** `25cbb5af564d58b2fea763b5d586e7a7f30b8be1`
 
 This ranks deletion candidates by evidence quality and expected semantic risk.
 It is not a promotion decision.
 
 | Rank | Candidate | Evidence | Missing gate | Current decision |
 | ---: | --- | --- | --- | --- |
-| 1 | E12 suffix wrappers and repeated booleans | fixture corpus + one-lookup Shadow equivalence | full routing corpus, private-import audit, rollback patch | **SHADOW MORE** |
-| 2 | E03 YFinance inactive retry surface | ordinary wrapped transport appears behaviorally inactive | replay transient failures, prove no governed retry path is lost | **SHADOW MORE** |
-| 3 | E08 repeated config literals | bounded drift matrix identifies duplicate facts | exact-head CI, imported-constant compatibility and rollback | **SHADOW** |
-| 4 | E11 positive snapshot mechanics | TTL boundary differential now passes; shapes are similar | write/clear/thread/logging differential and total read-set accounting | **SHADOW** |
+| 1 | E12 suffix wrappers and repeated booleans | full routing corpus + one-lookup Shadow equivalence + compatibility scan | production owner authorization and rollback design | **PROMOTION CANDIDATE / FROZEN** |
+| 2 | E03 YFinance inactive retry surface | ordinary wrapped transport is single-call under synthetic transport failure | exception/fallback matrix; no real retry restoration | **SHADOW MORE** |
+| 3 | E08 repeated config literals | bounded drift matrix identifies aligned duplicate facts | imported-constant compatibility and rollback | **SHADOW** |
+| 4 | E11 positive snapshot mechanics | TTL boundary differential only | write/clear/thread/logging differential and total read-set accounting | **SHADOW / UNKNOWN** |
 | 5 | E10 classifier merge | expanded differential found real category/detail divergence | no credible path while provider semantics differ | **REJECT for now** |
 
 ## Ordering rule

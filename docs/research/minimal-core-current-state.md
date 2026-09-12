@@ -29,24 +29,24 @@ preserved governed semantics
 | ID | Surface | Current status | Current decision |
 | --- | --- | --- | --- |
 | E01 | Currentness | delegated / differential replay spec | SHADOW |
-| E03 | retry/fallback | Efinance + YFinance evidence | SHADOW / separate retry from fallback |
+| E03 | retry/fallback | YFinance ordinary wrapped path is single-call; exception matrix still incomplete | SHADOW MORE / no retry restoration |
 | E05 | provider capability boundary | Golden Contract identified | SHADOW |
 | E06 | Agent read-set/token | benchmark spec | SHADOW |
 | E07 | Headroom/tool output | protected-field benchmark spec | SHADOW only |
-| E08 | config facts | bounded drift matrix + Shadow test | tests/imported constants before framework |
+| E08 | config facts | bounded drift matrix + Shadow test; STOCK_LIST and empty fallback semantics protected | SHADOW / tests or imported constants only |
 | E09 | pipeline/read-set | HK symbol representative task measured at 7 file reads | SHADOW evidence |
 | E10 | failure taxonomy | expanded differential found real divergences | SHADOW MORE; universal framework REJECT |
-| E11 | cache semantics | semantic matrix + TTL boundary differential complete | SHADOW evidence; broad unification REJECT |
-| E12 | symbol semantics | fixture corpus + full routing differential + 9→3 call-site delta | provider wire remains adapter-local |
+| E11 | cache semantics | positive TTL boundary passes; lifecycle/read-set comparison incomplete | SHADOW boundary only; abstraction UNKNOWN, broad unification REJECT |
+| E12 | symbol semantics | fixture corpus + full routing differential + 9→3 call-site delta | PROMOTION CANDIDATE; production owner review still required |
 
 ## Strongest current DELETE candidates
 
 Not production-approved:
 
-1. **E12 suffix wrappers:** full Shadow differential preserves market-tag and daily/realtime route decisions across CN/HK/US, JP/KR/TW, unknown and adversarial suffix inputs. The measured 9 wrapper-call expressions reduce to 3 Shadow lookups (-6), with `net_complexity_result = SMALLER`; production routing equivalence and compatibility-import review remain pending.
-2. **E03 YFinance:** retry machinery may be behaviorally inactive on the ordinary wrapped transport path. Decide KEEP-single-attempt-and-simplify vs governed real retry.
-3. **E08 config literals:** backend timeout/output/concurrency defaults are repeated across runtime constants, registry metadata and `.env.example`; tests/imported constants may remove duplicated facts without a config framework.
-4. **E11 positive snapshot cache mechanics:** Efinance/AkShare simple `{data,timestamp,ttl}` mechanics may share a tiny primitive if it is genuinely smaller.
+1. **E12 suffix wrappers:** full Shadow differential preserves market-tag and daily/realtime route decisions across CN/HK/US, JP/KR/TW, unknown and adversarial suffix inputs. The measured 9 wrapper-call expressions reduce to 3 Shadow lookups (-6), with `net_complexity_result = SMALLER`; production deletion remains frozen pending owner authorization.
+2. **E03 YFinance:** retry machinery is behaviorally inactive on the ordinary wrapped transport path; keep production unchanged until the remaining exception/fallback matrix decides whether dead machinery can be deleted.
+3. **E08 config literals:** only aligned numeric/backend defaults are candidates; use tests/imported constants, exclude `STOCK_LIST`, and preserve missing-versus-empty fallback semantics. `net_complexity_result = UNKNOWN`.
+4. **E11 positive snapshot cache mechanics:** TTL predicate boundary is Shadow-pass only. A generic abstraction is rejected; a local primitive remains `net_complexity_result = UNKNOWN` until lifecycle/read-set evidence proves it smaller.
 
 ## Candidate downgraded after evidence
 
@@ -151,10 +151,10 @@ Historical sync/delta packets remain in `docs/research/cross-project-sync-minima
 
 ```text
 branch: research/minimal-core-initiative-v0-1
-head: d4c61d8c4a7f69c88c87f46ea6960ee62c63ccaa
+head: 25cbb5af564d58b2fea763b5d586e7a7f30b8be1
 commit: test: fix E12 routing differential imports
 mode: Research / Shadow only
 production runtime: unchanged
 PR #71: open, unmerged
-exact-head checks: CI #219 success; Research Radar Tests #237 success
+exact-head checks: CI #221 success; Research Radar Tests #239 success
 ```

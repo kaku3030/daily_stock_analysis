@@ -164,7 +164,7 @@ Finding format:
 
 `Current -> Pain -> Minimal reference -> Candidate simplification -> Expected gain -> Risk -> Validation seam -> Owner -> Decision`
 
-See `docs/research/minimal-core-baseline.md`.
+See `docs/research/minimal-core-current-state.md` for the durable current-state pointer; historical baseline detail is preserved in PR history.
 
 ## Phase 1 — External harvest
 
@@ -183,7 +183,7 @@ Each external reference gets a harvest card containing:
 
 No external code is vendored during this phase.
 
-See `docs/research/minimal-core-harvest-ledger.md`.
+See `docs/research/minimal-core-harvest-ledger-v0.2.md`.
 
 ## Success metrics
 

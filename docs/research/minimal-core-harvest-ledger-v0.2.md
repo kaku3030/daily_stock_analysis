@@ -2,7 +2,7 @@
 
 **Status:** canonical external-reference ledger for the Minimal Core Initiative  
 **Mode:** research only; no vendoring or production replacement from this ledger alone  
-**Supersedes:** `minimal-core-harvest-ledger.md`
+**Status:** durable harvest ledger; the earlier ledger was superseded and removed from the mainline read-set.
 
 ## Governing rule
 
