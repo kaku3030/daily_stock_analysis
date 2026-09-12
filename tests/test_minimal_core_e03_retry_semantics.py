@@ -7,9 +7,11 @@ compared against the existing Tenacity wrapper.
 
 import pytest
 import requests
+import pandas as pd
 from tenacity import RetryError
 
-from data_provider.base import DataFetchError, unwrap_exception
+from data_provider.base import DataFetchError, DataFetcherManager, unwrap_exception
+from data_provider.akshare_fetcher import AkshareFetcher
 from data_provider.base import RateLimitError
 from data_provider.efinance_fetcher import EfinanceFetcher
 
@@ -65,6 +67,69 @@ def test_e03_non_retryable_semantic_error_is_not_wrapped():
         fetcher._fetch_raw_data("AAPL", "2026-09-01", "2026-09-02")
 
     assert "不支持美股" in str(caught.value)
+
+
+def test_e03_akshare_transport_retry_is_distinct_from_provider_fallback(monkeypatch):
+    fetcher = AkshareFetcher(sleep_min=0.0, sleep_max=0.0)
+    calls = []
+
+    def eastmoney(*_args):
+        calls.append("eastmoney")
+        raise ConnectionError("eastmoney transient")
+
+    def sina(*_args):
+        calls.append("sina")
+        return pd.DataFrame({"date": ["2026-09-01"], "close": [1.0]})
+
+    monkeypatch.setattr(fetcher, "_fetch_stock_data_em", eastmoney)
+    monkeypatch.setattr(fetcher, "_fetch_stock_data_sina", sina)
+    monkeypatch.setattr(fetcher, "_fetch_stock_data_tx", lambda *_args: pd.DataFrame())
+
+    result = fetcher._fetch_stock_data("600519", "2026-09-01", "2026-09-02")
+    assert not result.empty
+    assert calls == ["eastmoney", "sina"]
+
+
+def test_e03_manager_retry_respects_attempt_and_total_budget(monkeypatch):
+    class Config:
+        fundamental_retry_max = 3
+
+    manager = DataFetcherManager(fetchers=[])
+    outcomes = iter([("first", "timeout", 400), ("second", "connection", 700), ("ok", None, 1)])
+    calls = []
+
+    monkeypatch.setattr(manager, "_get_fundamental_config", lambda: Config())
+
+    def fake_timeout(task, remaining, task_name):
+        calls.append((remaining, task_name))
+        return next(outcomes)
+
+    monkeypatch.setattr(manager, "_run_with_timeout", fake_timeout)
+    result, error, elapsed = manager._run_with_retry(lambda: None, 1.0, "e03")
+    assert (result, error, elapsed) == (None, "connection", 1100)
+    assert len(calls) == 2
+    assert calls[1][0] == pytest.approx(0.6)
+
+
+def test_e03_manager_semantic_failures_are_not_promoted_by_retry(monkeypatch):
+    class Config:
+        fundamental_retry_max = 3
+
+    manager = DataFetcherManager(fetchers=[])
+    calls = 0
+    monkeypatch.setattr(manager, "_get_fundamental_config", lambda: Config())
+
+    def semantic_failure(task, remaining, task_name):
+        nonlocal calls
+        calls += 1
+        return None, "AUTH_ERROR", 1
+
+    monkeypatch.setattr(manager, "_run_with_timeout", semantic_failure)
+    result, error, elapsed = manager._run_with_retry(lambda: None, 1.0, "auth")
+    assert result is None
+    assert error == "AUTH_ERROR"
+    assert calls == 3
+    assert elapsed == 3
 
 
 @pytest.mark.parametrize(

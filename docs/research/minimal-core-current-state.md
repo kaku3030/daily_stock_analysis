@@ -29,7 +29,7 @@ preserved governed semantics
 | ID | Surface | Current status | Current decision |
 | --- | --- | --- | --- |
 | E01 | Currentness | delegated / differential replay spec | SHADOW |
-| E03 | retry/fallback | YFinance ordinary wrapped path is single-call; transport/data/parser matrix now records call count and causal surface | SHADOW MORE / no retry restoration |
+| E03 | retry/fallback | Efinance four-exception matrix, AkShare retry-vs-provider fallback, manager budget, and negative semantic paths are recorded at exact head `b8e50a1cfcd3aa6339d260997518349af672c52b` | KEEP CURRENT PRODUCTION; no simplification promoted |
 | E05 | provider capability boundary | Golden Contract identified | SHADOW |
 | E06 | Agent read-set/token | benchmark spec | SHADOW |
 | E07 | Headroom/tool output | protected-field benchmark spec | SHADOW only |

@@ -205,3 +205,72 @@ E03 can promote a code simplification only when:
 - provider fallback sequence is unchanged unless separately governed;
 - diagnostics remain auditable;
 - targeted tests include success-after-transient and semantic-no-retry negative cases.
+
+## 9. E03 completion packet — baseline `b8e50a1cfcd3aa6339d260997518349af672c52b`
+
+The current exact head was re-fetched before the evidence run and did not move.
+Sibling scan result: `SIBLING_CHECKED_NO_EQUIVALENT`. The five-lane delegation,
+current-state, and open research assets were checked; E05, #85, and #89 were
+not changed or reopened.
+
+### Efinance differential matrix
+
+The tests call `EfinanceFetcher._fetch_raw_data()` directly, with only its
+actual `_fetch_stock_data` production dependency patched. `sleep_min=0` makes
+elapsed behavior deterministic without waiting.
+
+| injected failure | production attempts | surface | root/diagnostics | action |
+| --- | ---: | --- | --- | --- |
+| `ConnectionError` | 1 | `RetryError` | original exception retained by `unwrap_exception` | wrapper only; no second call |
+| `TimeoutError` | 1 | `RetryError` | original timeout retained | wrapper only; no second call |
+| `requests.RequestException` | 1 | `RetryError` | original request exception retained | wrapper only; no second call |
+| `RateLimitError` | 1 | native `RateLimitError` | provider message retained | no generic retry |
+
+Unsupported-market `DataFetchError` is also one call and remains a semantic
+no-retry failure. The differential elapsed bound is under one second with no
+sleep; the configured exponential wait is unreachable because
+`stop_after_attempt(1)` prevents a before-sleep retry.
+
+### AkShare, manager, and Delivery boundaries
+
+`test_e03_akshare_transport_retry_is_distinct_from_provider_fallback` uses
+the real `_fetch_stock_data` loop: an Eastmoney transient failure is followed
+by Sina, proving provider failover is a separate outer action. The existing
+AkShare `_fetch_raw_data` decorator remains the same-source retry owner; no
+provider chain is folded into that decorator.
+
+`DataFetcherManager._run_with_retry` was exercised directly through the real
+method with a deterministic `_run_with_timeout` seam. With a 1.0-second
+budget, costs of 400 ms then 700 ms produce exactly two attempts, return the
+second error, and stop before a third attempt. An `AUTH_ERROR` is retained as
+an error across the configured attempt count and is never converted to
+success. This preserves total-budget-aware retry rather than replacing it with
+a generic decorator.
+
+Delivery remains single-attempt: `NotificationService.send_with_results`
+iterates each selected static channel once and has no retry loop. A failed
+channel is reported as one `ChannelAttemptResult`; its `retryable` diagnostic
+does not cause an in-call resend. This is distinct from notification cooldown
+and from provider retry/fallback.
+
+The negative matrix is closed by native-path behavior and existing contract
+owners: auth and entitlement failures remain semantic/configuration results;
+stale/currentness `UNKNOWN` remains evidence-quality state; malformed or
+validation/schema failures remain contract failures. None is added to the
+Efinance/AkShare transport retry predicates or manager success path.
+
+### Adjudication
+
+`semantic_owner_delta=0`; `private_reach_through_delta=0`; `agent_read_set_delta`
+was not measured in this run. `net_complexity_result=UNKNOWN`: the Efinance
+decorator’s wrapper surface differs from the undecorated native surface, and
+the manager’s budget semantics are not safely replaceable by a smaller generic
+policy. No production refactor is authorized by this evidence packet.
+
+Harvest decision: `KEEP_CURRENT_PRODUCTION`.
+
+AI_MONITOR/CONTROL_TOWER adjudication: **KEEP CURRENT PRODUCTION**.
+
+This closes the E03 evidence matrix without promoting a simplification. The
+research tests are intentionally unmerged artifacts until the governed
+promotion path authorizes a separately reviewed production change.
