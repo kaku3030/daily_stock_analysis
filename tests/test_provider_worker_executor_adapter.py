@@ -7,6 +7,7 @@ from src.services.live_feed.controller import LiveFeedController, run_command_wo
 from src.services.live_feed.provider_worker_contracts import ProviderExecutionOutcome, ResolvedProviderCommandOutcome
 from src.services.live_feed.provider_worker_executor_adapter import ExecutorAdapter
 from src.services.live_feed.provider_worker_supervisor import CommandInFlightError
+import threading
 
 NOW = datetime(2026, 9, 12, tzinfo=timezone.utc)
 
@@ -30,6 +31,16 @@ def test_03_adapter_token_rejects_second_local_command():
     with pytest.raises(CommandInFlightError): a.submit(second)
 def test_04_submit_does_not_call_supervisor():
     s,c,a=stack(); a.submit(cmd(c)); assert s.calls==[]
+
+def test_04b_capacity_token_survives_in_flight_supervisor_resolution():
+    entered = threading.Event(); release = threading.Event()
+    class BlockingSup(Sup):
+        def submit_command(self, command, *, payload=None):
+            entered.set(); assert release.wait(2); return super().submit_command(command, payload=payload)
+    s=BlockingSup(); a=ExecutorAdapter(supervisor=s); c=LiveFeedController(runtime_instance_id="r", provider_id="p", command_executor=a); a.attach_controller(c)
+    first, second = cmd(c), cmd(c); a.start(); assert run_command_worker_once(c,a)==1; assert entered.wait(2)
+    with pytest.raises(CommandInFlightError): a.submit(second)
+    release.set(); a.stop(join_timeout_seconds=2)
 def test_05_unexpected_exception_is_fail_loud_no_result(caplog):
     s,c,a=stack(RuntimeError("boom")); x=cmd(c); a.start(); run_command_worker_once(c,a); a.stop(join_timeout_seconds=2); assert a.is_dead and c.command_results==(); assert x.command_id in caplog.text
 def test_06_no_replay_after_dispatcher_death():

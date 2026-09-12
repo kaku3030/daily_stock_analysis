@@ -205,8 +205,16 @@ class ExecutorAdapter:
                     self._accepted_cv.wait(_IDLE_POLL_SECONDS)
                 if not self._accepted and self._stop_event.is_set():
                     return
-                command = self._accepted.popleft()
-            if not self._dispatch_one(command):
+                # Keep the capacity-one token occupied for the entire
+                # authoritative handoff.  In particular, do not release it
+                # while submit_command() is in flight.
+                command = self._accepted[0]
+            dispatch_succeeded = self._dispatch_one(command)
+            with self._accepted_cv:
+                if self._accepted and self._accepted[0] is command:
+                    self._accepted.popleft()
+                self._accepted_cv.notify_all()
+            if not dispatch_succeeded:
                 return
 
     def _dispatch_one(self, command: ProviderCommand) -> bool:
@@ -246,8 +254,6 @@ class ExecutorAdapter:
             self._mark_dead()
             return False
         delivered = self._deliver(self._translate(outcome))
-        with self._accepted_cv:
-            self._accepted_cv.notify_all()
         return delivered
 
     # ---- translation (mechanical only -- no judgment) --------------------
