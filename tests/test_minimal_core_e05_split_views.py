@@ -22,6 +22,7 @@ class RuntimeProviderObservation:
     status: str
     available: bool | None
     last_error: str | None
+    cooldown: object
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,9 @@ def _views(overview):
         for item in overview["providers"]
     )
     runtime = tuple(
-        RuntimeProviderObservation(item["name"], item["status"], item.get("available"), item.get("last_error"))
+        RuntimeProviderObservation(
+            item["name"], item["status"], item.get("available"), item.get("last_error"), item.get("cooldown")
+        )
         for item in overview["providers"]
     )
     routing = tuple(
@@ -118,6 +121,32 @@ def test_e05_golden_contract_edges():
     assert routes["us.realtime"].source_tokens[0] == "yfinance"
     assert "futu" not in routes["hk.realtime"].source_tokens
     assert runtime["akshare"].last_error == "provider failed"
+    assert runtime["akshare"].cooldown is None
+
+
+def test_e05_runtime_cooldown_is_projected_without_normalization():
+    overview = {
+        "providers": [
+            {
+                "name": "synthetic",
+                "status": "unknown",
+                "available": None,
+                "last_error": None,
+                "cooldown": {"remaining": "7.5", "marker": object()},
+                "fetcher": None,
+                "datasets": [],
+                "dataset_markets": {},
+                "configured": False,
+                "enabled": False,
+            }
+        ],
+        "priorities": [],
+    }
+
+    cooldown = overview["providers"][0]["cooldown"]
+    runtime = _views(overview)["runtime"]
+
+    assert runtime[0].cooldown is cooldown
 
 
 def test_e05_cn_stock_and_index_routes_are_separate_and_source_authority_is_preserved():
