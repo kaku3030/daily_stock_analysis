@@ -654,7 +654,13 @@ def run_command_worker_once(controller: LiveFeedController, executor: ProviderCo
     and commands.py for what remains unresolved for Slice 2.
     """
 
-    commands = controller.drain_commands_for_worker(max_items=max_items)
-    for command in commands:
+    accepted = 0
+    limit = 1 if max_items is None else min(1, max_items)
+    for _ in range(limit):
+        command = controller.peek_command_for_worker()
+        if command is None:
+            break
         executor.submit(command)
-    return len(commands)
+        controller.ack_command_for_worker(command.command_id)
+        accepted += 1
+    return accepted

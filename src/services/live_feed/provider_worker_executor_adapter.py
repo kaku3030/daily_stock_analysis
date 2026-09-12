@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import threading
 import logging
+from collections import deque
 from datetime import datetime, timezone
 from typing import Callable
 
@@ -119,6 +120,8 @@ class ExecutorAdapter:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._dead = False
+        self._accepted: deque[ProviderCommand] = deque(maxlen=1)
+        self._accepted_cv = threading.Condition(self._state_lock)
 
     # ---- ProviderCommandExecutor Protocol conformance ----------------
 
@@ -126,19 +129,16 @@ class ExecutorAdapter:
         self._sink = sink
 
     def submit(self, command: ProviderCommand) -> None:
-        """Protocol conformance only -- NOT the production dispatch path.
-
-        The frozen Slice C command flow is pull-based: the dispatcher
-        thread calls the attached controller's ``drain_commands_for_worker``
-        itself. Nothing in this Slice's composition ever calls ``submit``;
-        it exists solely so this class structurally satisfies
-        ``ProviderCommandExecutor`` for type-checking purposes.
-        """
-
-        raise NotImplementedError(
-            "ExecutorAdapter.submit() is not the production dispatch path -- "
-            "the dispatcher thread pulls from the attached controller instead"
-        )
+        """Accept one command locally and return without provider work."""
+        if not isinstance(command, ProviderCommand):
+            raise ValueError("command must be a ProviderCommand")
+        with self._accepted_cv:
+            if self._dead or self._stop_event.is_set():
+                raise AdapterDeadError("adapter is not accepting commands")
+            if self._accepted:
+                raise CommandInFlightError("adapter capacity-one token is occupied")
+            self._accepted.append(command)
+            self._accepted_cv.notify()
 
     # ---- two-phase binding --------------------------------------------
 
@@ -199,11 +199,13 @@ class ExecutorAdapter:
     def _dispatch_loop(self) -> None:
         controller = self._controller
         assert controller is not None  # guaranteed by start()'s own check
-        while not self._stop_event.is_set():
-            command = controller.peek_command_for_worker()
-            if command is None:
-                self._stop_event.wait(_IDLE_POLL_SECONDS)
-                continue
+        while True:
+            with self._accepted_cv:
+                while not self._accepted and not self._stop_event.is_set():
+                    self._accepted_cv.wait(_IDLE_POLL_SECONDS)
+                if not self._accepted and self._stop_event.is_set():
+                    return
+                command = self._accepted.popleft()
             if not self._dispatch_one(command):
                 return
 
@@ -243,10 +245,10 @@ class ExecutorAdapter:
             _LOGGER.exception("ExecutorAdapter dispatcher fault for command_id=%s", command.command_id)
             self._mark_dead()
             return False
-        controller = self._controller
-        assert controller is not None
-        controller.ack_command_for_worker(command.command_id)
-        return self._deliver(self._translate(outcome))
+        delivered = self._deliver(self._translate(outcome))
+        with self._accepted_cv:
+            self._accepted_cv.notify_all()
+        return delivered
 
     # ---- translation (mechanical only -- no judgment) --------------------
 
