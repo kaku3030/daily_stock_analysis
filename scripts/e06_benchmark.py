@@ -17,6 +17,14 @@ METRICS = (
     "time_to_identify_authoritative_owner_seconds", "wrong_path_count",
     "reopen_count",
 )
+PROTECTED_CONTRACTS = (
+    "production_owner_correct", "unknown_preserved",
+    "no_unauthorized_second_runtime_or_source", "retry_vs_fallback_semantics_correct",
+    "currentness_calendar_not_delegated_to_llm",
+    "notification_single_attempt_or_fallback_legality_preserved",
+    "required_tests_or_replay_named",
+)
+OFFICIAL_STATUSES = ("CONTAMINATED", "PENDING_FRESH_CONTEXT", "ELIGIBLE")
 
 
 def count_tokens(text: str, encoding: str = "cl100k_base") -> int:
@@ -42,7 +50,8 @@ def make_row(*, task_id: str, run_id: str, context: str, contamination: bool = T
     }
     return {
         "schema_version": SCHEMA_VERSION, "task_id": task_id, "run_id": run_id,
-        "context": context, "contamination": contamination, "official_status": "PENDING_FRESH_CONTEXT",
+        "context": context, "contamination": contamination,
+        "official_status": "CONTAMINATED" if contamination else "PENDING_FRESH_CONTEXT",
         "layers": {layer: {"text_bytes": len(layer_text[layer].encode("utf-8")),
                            "tokens": count_tokens(layer_text[layer])} for layer in LAYERS},
         "metrics": measured,
@@ -55,10 +64,25 @@ def validate_row(row: dict[str, Any]) -> None:
         raise ValueError("unsupported schema_version")
     if set(row.get("layers", {})) != set(LAYERS):
         raise ValueError("layers A/B/C are required and must remain separate")
-    if row.get("contamination") is not True and row.get("official_status") == "PENDING_FRESH_CONTEXT":
-        raise ValueError("fresh-context rows must explicitly set contamination=true until reviewed")
-    if row.get("correctness_gate", {}).get("result") == "PASS" and row.get("contamination"):
+    status = row.get("official_status")
+    if status not in OFFICIAL_STATUSES:
+        raise ValueError("invalid official_status")
+    if row.get("contamination") is True and status != "CONTAMINATED":
+        raise ValueError("contaminated rows cannot be official baseline candidates")
+    if row.get("contamination") is not True and status == "CONTAMINATED":
+        raise ValueError("fresh rows cannot be marked contaminated")
+    if row.get("contamination") and row.get("correctness_gate", {}).get("result") == "PASS":
         raise ValueError("contaminated rows cannot pass the official correctness gate")
+    gate = row.get("correctness_gate", {})
+    evaluations = gate.get("protected_governance")
+    result = gate.get("result")
+    if result == "PASS" and (
+        set(evaluations or ()) != set(PROTECTED_CONTRACTS)
+        or any(evaluations[name] != "PASS" for name in PROTECTED_CONTRACTS)
+    ):
+        raise ValueError("correctness PASS requires all seven protected contracts to PASS")
+    if status == "ELIGIBLE" and (row.get("contamination") or result != "PASS"):
+        raise ValueError("official eligibility requires fresh context and correctness PASS")
 
 
 def main() -> None:

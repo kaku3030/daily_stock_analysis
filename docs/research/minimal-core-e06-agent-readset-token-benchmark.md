@@ -123,11 +123,20 @@ Use `scripts/e06_benchmark.py` to validate one JSON object per JSONL row. It rec
 Layer A/B/C independently, all primary metrics (including `wrong_path_count` and
 `reopen_count`), a contamination flag, and the correctness-gate result. The tokenizer
 is the existing `tiktoken` dependency with fixed `cl100k_base` encoding; no byte-based
-token estimate is permitted. The self-test is not an official sample.
+token estimate is permitted. The self-test is not an official sample. The validator
+fails closed: `correctness_gate.result=PASS` requires explicit `PASS` for all seven
+protected contracts (`production_owner_correct`, `unknown_preserved`,
+`no_unauthorized_second_runtime_or_source`, `retry_vs_fallback_semantics_correct`,
+`currentness_calendar_not_delegated_to_llm`,
+`notification_single_attempt_or_fallback_legality_preserved`, and
+`required_tests_or_replay_named`). Missing, `None`, `UNKNOWN`, or `FAIL` is never PASS.
 
-Every initial sample must remain `official_status=PENDING_FRESH_CONTEXT` until it is
-run from a fresh agent context. Current-chat runs are smoke tests only and must carry
-`contamination=true`. E06-T5 may reuse this recorder for E12 evidence; do not create
+Contaminated/current-chat/migration samples are emitted as
+`official_status=CONTAMINATED` and cannot be official baseline candidates. A fresh
+sample starts as `PENDING_FRESH_CONTEXT`; only a fresh sample with all seven explicit
+contract evaluations passing may be marked `ELIGIBLE`. The validator rejects
+inconsistent contamination/status combinations, so toggling a boolean alone cannot
+make a sample eligible. E06-T5 may reuse this recorder for E12 evidence; do not create
 a second E12 harness.
 
 ## 6. Correctness gate
@@ -176,7 +185,8 @@ No percentage saving is claimed in this document.
 A simplification is considered agent-context-positive when, across the benchmark tasks it targets:
 
 - correctness stays at 100% on protected governance questions;
-- median files/bytes/tokens read decrease;
+- median files/bytes/tokens read decrease; reductions from correctness-failing,
+  contaminated, single-run, bytes-only, or LOC-only samples are not savings evidence;
 - authoritative owner is identified earlier;
 - reopen count does not increase;
 - tests required for confidence do not increase because semantics became hidden;
