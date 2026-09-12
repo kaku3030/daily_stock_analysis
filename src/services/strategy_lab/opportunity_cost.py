@@ -7,8 +7,8 @@ from dataclasses import asdict, dataclass
 from enum import StrEnum
 from typing import Any, Iterable, Sequence
 
-from services.stock_radar_v2.execution_reality import ShadowExecutionRecord
-from services.stock_radar_v2.observation_ledger import Observation
+from src.services.stock_radar_v2.execution_reality import ShadowExecutionRecord
+from src.services.stock_radar_v2.observation_ledger import Observation
 
 
 DEFINITION_VERSION = "opportunity-truth-v0.1"

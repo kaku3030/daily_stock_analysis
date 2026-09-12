@@ -1,8 +1,8 @@
 import pytest
 
-from services.stock_radar_v2 import Observation, ShadowExecutionRecord
-from services.stock_radar_v2.observation_ledger import LatencyTrace
-from services.strategy_lab.opportunity_cost import (
+from src.services.stock_radar_v2 import Observation, ShadowExecutionRecord
+from src.services.stock_radar_v2.observation_ledger import LatencyTrace
+from src.services.strategy_lab.opportunity_cost import (
     MissReason, OpportunityTruth, RecallEvaluationLedger, TruthStatus, attribute_miss, metrics,
     simulate_counterfactual_lifecycle,
 )
@@ -10,6 +10,14 @@ from services.strategy_lab.opportunity_cost import (
 
 def truth(status=TruthStatus.OPPORTUNITY, *, censored=False):
     return OpportunityTruth("x", "u1", "opportunity-truth-v0.1", 10, 21, 20, status, censored, mfe=5)
+
+
+def test_strategy_lab_imports_from_repository_root():
+    import src.services.strategy_lab as strategy_lab
+    import src.services.strategy_lab.opportunity_cost as opportunity_cost
+
+    assert strategy_lab is not None
+    assert opportunity_cost is not None
 
 
 @pytest.mark.parametrize(("observation", "reason"), [
@@ -33,7 +41,7 @@ def test_unknown_and_censored_never_become_negative_or_denominator():
 def test_truth_requires_future_label_and_metrics_boundaries():
     with pytest.raises(ValueError):
         OpportunityTruth("x", "u", "v", 10, 20, 20, TruthStatus.OPPORTUNITY, False)
-    record = __import__('services.strategy_lab.opportunity_cost', fromlist=['evaluate']).evaluate(
+    record = __import__('src.services.strategy_lab.opportunity_cost', fromlist=['evaluate']).evaluate(
         [Observation("x", "DETECTED", strategy_eligible=True, portfolio_admissible=True)], [truth()])[0]
     assert metrics([record])["detector_recall"] == 1.0
     assert metrics([record])["strategy_recall"] == 1.0
@@ -63,8 +71,8 @@ def test_ttc_is_capture_delay_and_unknown_samples_do_not_enter_summary():
     t = OpportunityTruth("x", "u1", "v", 10, 21, 20, TruthStatus.OPPORTUNITY, False, reference_onset_at=10, mfe=5)
     observation = Observation("x", "DETECTED", strategy_eligible=True, portfolio_admissible=True,
                               latency=LatencyTrace(detected_at=13))
-    record = __import__('services.strategy_lab.opportunity_cost', fromlist=['evaluate']).evaluate([observation], [t])[0]
+    record = __import__('src.services.strategy_lab.opportunity_cost', fromlist=['evaluate']).evaluate([observation], [t])[0]
     assert record.capture_at == 13
     assert metrics([record])["time_to_capture_p50"] == 3
     unknown = OpportunityTruth("u", "u1", "v", 10, 21, 20, TruthStatus.UNKNOWN, False)
-    assert metrics(__import__('services.strategy_lab.opportunity_cost', fromlist=['evaluate']).evaluate([], [unknown]))["status"] == "UNKNOWN"
+    assert metrics(__import__('src.services.strategy_lab.opportunity_cost', fromlist=['evaluate']).evaluate([], [unknown]))["status"] == "UNKNOWN"
