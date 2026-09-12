@@ -8,9 +8,13 @@ permissions:
   contents: read
 
 jobs:
-  validate-e01-shard3:
-    name: validate-e01-shard3-full-history
+  validate-e01-shards:
+    name: validate-e01-shard${{ matrix.shard }}-full-history
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [2, 3]
     steps:
       - name: Checkout with pinned baseline history
         uses: actions/checkout@v5
@@ -36,12 +40,13 @@ jobs:
           git cat-file -e ef27aec4d8f5cb89093399081fcd5e750473f99c^{commit}
           git show ef27aec4d8f5cb89093399081fcd5e750473f99c:realtime_monitor/server.py >/dev/null
 
-      - name: Run exact shard 3 with auditable pytest output
+      - name: Run shard ${{ matrix.shard }} with auditable pytest output
         env:
           PYTEST_SPLITS: '3'
-          PYTEST_GROUP: '3'
+          PYTEST_GROUP: ${{ matrix.shard }}
           PYTEST_FIRST_SHARD_OVERHEAD: '20'
         run: |
+          mkdir -p .artifacts
           python scripts/ci_test_shard.py \
             --splits "$PYTEST_SPLITS" \
             --group "$PYTEST_GROUP" \
@@ -52,12 +57,12 @@ jobs:
             -o faulthandler_timeout=300 \
             --durations=30 --durations-min=0.5 \
             -ra --tb=short \
-            --junitxml=.artifacts/e01-shard3-junit.xml
+            --junitxml=.artifacts/e01-shard${PYTEST_GROUP}-junit.xml
 
-      - name: Upload shard 3 JUnit evidence
+      - name: Upload shard ${{ matrix.shard }} JUnit evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e01-shard3-junit
-          path: .artifacts/e01-shard3-junit.xml
+          name: e01-shard${{ matrix.shard }}-junit
+          path: .artifacts/e01-shard${{ matrix.shard }}-junit.xml
           if-no-files-found: warn
