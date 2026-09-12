@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 from enum import StrEnum
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 from services.stock_radar_v2.execution_reality import ShadowExecutionRecord
 from services.stock_radar_v2.observation_ledger import Observation
@@ -45,6 +45,8 @@ class OpportunityTruth:
     mae: float | None = None
     independent_leadership: bool | None = None
     rs_persistence: float | None = None
+    reference_onset_at: float | None = None
+    eligible_at: float | None = None
 
     def __post_init__(self) -> None:
         if self.horizon <= 0 or self.label_available_at <= self.outcome_end_at:
@@ -75,6 +77,10 @@ class RecallEvaluationRecord:
     miss_reason: MissReason
     simulated_execution_id: str | None = None
     lifecycle_outcome: str | None = None
+    exit_at: float | None = None
+    lifecycle_mae: float | None = None
+    lifecycle_mfe: float | None = None
+    capture_at: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
@@ -124,9 +130,47 @@ def attribute_miss(observation: Observation | None, truth: OpportunityTruth) -> 
     return MissReason.UNKNOWN
 
 
+@dataclass(frozen=True)
+class CounterfactualLifecycle:
+    execution: ShadowExecutionRecord
+    outcome: str
+    exit_at: float | None = None
+    mae: float | None = None
+    mfe: float | None = None
+
+
 def counterfactual_execution(execution: ShadowExecutionRecord) -> ShadowExecutionRecord:
-    """Research replay boundary; construction enforces causal/no-same-bar timing."""
+    """Pure research boundary; the record constructor enforces causal timing."""
     return execution
+
+
+def simulate_counterfactual_lifecycle(
+    *,
+    observation: Observation,
+    execution: ShadowExecutionRecord | None,
+    exit_at: float | None = None,
+    mae: float | None = None,
+    mfe: float | None = None,
+) -> CounterfactualLifecycle | None:
+    """Replay eligibility -> executable fill -> lifecycle, without hindsight."""
+    if observation.earliest_executable_at is None:
+        return None
+    if execution is None or execution.order_intent_at < observation.earliest_executable_at:
+        return None
+    if execution.simulated_fill_at is None or execution.simulated_fill_at < observation.earliest_executable_at:
+        return None
+    return CounterfactualLifecycle(execution, "FILLED", exit_at, mae, mfe)
+
+
+def time_to_capture(truth: OpportunityTruth, observation: Observation | None) -> float | None:
+    """Opportunity-capture delay only; excludes policy and infrastructure latency."""
+    onset = truth.reference_onset_at if truth.reference_onset_at is not None else truth.eligible_at
+    capture = observation.latency.detected_at if observation is not None else None
+    if truth.status is not TruthStatus.OPPORTUNITY or truth.censored or onset is None or capture is None:
+        return None
+    if capture < onset or onset > truth.label_available_at:
+        return None
+    return capture - onset
 
 
 def evaluate(observations: Iterable[Observation], truths: Iterable[OpportunityTruth]) -> tuple[RecallEvaluationRecord, ...]:
@@ -143,6 +187,7 @@ def evaluate(observations: Iterable[Observation], truths: Iterable[OpportunityTr
             observation.canonical_permission if observation else "UNKNOWN",
             observation.earliest_executable_at if observation else None,
             attribute_miss(observation, truth),
+            capture_at=observation.latency.detected_at if observation else None,
         ))
     return tuple(result)
 
@@ -156,10 +201,19 @@ def metrics(records: Iterable[RecallEvaluationRecord]) -> dict[str, float | str]
     if not opportunities:
         return {"status": "UNKNOWN", "reason": "NO_OPPORTUNITY_LABELS"}
     def rate(n: int, d: int) -> float: return n / d
-    return {
+    ttc = [r.capture_at - (r.truth.reference_onset_at if r.truth.reference_onset_at is not None else r.truth.eligible_at)
+           for r in opportunities
+           if r.capture_at is not None
+           and (r.truth.reference_onset_at is not None or r.truth.eligible_at is not None)
+           and (r.truth.reference_onset_at if r.truth.reference_onset_at is not None else r.truth.eligible_at) <= r.capture_at
+           and (r.truth.reference_onset_at if r.truth.reference_onset_at is not None else r.truth.eligible_at) <= r.truth.label_available_at]
+    result = {
         "status": "KNOWN", "opportunity_recall": rate(sum(r.canonical_permission == "ALLOW" and r.execution_feasible is True for r in opportunities), len(opportunities)),
         "detector_recall": rate(sum(r.detector_seen for r in opportunities), len(opportunities)),
         "strategy_recall": rate(sum(r.strategy_eligible is True for r in opportunities), len(opportunities)),
         "missed_mfe": sum(r.truth.mfe or 0 for r in opportunities if r.miss_reason is not MissReason.UNKNOWN),
         "missed_expectancy_contribution": "PLACEHOLDER_RISK_ADJUSTED_V0.1",
     }
+    result["time_to_capture_count"] = len(ttc)
+    result["time_to_capture_p50"] = sorted(ttc)[(len(ttc) - 1) // 2] if ttc else "UNKNOWN"
+    return result

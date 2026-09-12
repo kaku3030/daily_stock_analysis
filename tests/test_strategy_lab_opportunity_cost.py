@@ -1,8 +1,10 @@
 import pytest
 
 from services.stock_radar_v2 import Observation, ShadowExecutionRecord
+from services.stock_radar_v2.observation_ledger import LatencyTrace
 from services.strategy_lab.opportunity_cost import (
     MissReason, OpportunityTruth, RecallEvaluationLedger, TruthStatus, attribute_miss, metrics,
+    simulate_counterfactual_lifecycle,
 )
 
 
@@ -43,3 +45,26 @@ def test_truth_requires_future_label_and_metrics_boundaries():
 def test_execution_reality_rejects_same_bar_hindsight():
     with pytest.raises(ValueError, match="same-bar hindsight"):
         ShadowExecutionRecord("e", 11, 11, 100, 1, 1, False, "f", "s", 0, confirmed_at=10, bar_end_at=11)
+
+
+def test_counterfactual_lifecycle_requires_earliest_executable_and_records_outcome():
+    observation = Observation("x", "DETECTED", strategy_eligible=True, portfolio_admissible=True,
+                              earliest_executable_at=11)
+    execution = ShadowExecutionRecord("e", 11, 12, 101, 1, 1, False, "f", "s", 0)
+    result = simulate_counterfactual_lifecycle(observation=observation, execution=execution,
+                                               exit_at=15, mae=-2, mfe=6)
+    assert result is not None and result.outcome == "FILLED" and result.mfe == 6
+    assert simulate_counterfactual_lifecycle(observation=observation, execution=None) is None
+    assert simulate_counterfactual_lifecycle(
+        observation=Observation("x", "DETECTED", earliest_executable_at=None), execution=execution) is None
+
+
+def test_ttc_is_capture_delay_and_unknown_samples_do_not_enter_summary():
+    t = OpportunityTruth("x", "u1", "v", 10, 21, 20, TruthStatus.OPPORTUNITY, False, reference_onset_at=10, mfe=5)
+    observation = Observation("x", "DETECTED", strategy_eligible=True, portfolio_admissible=True,
+                              latency=LatencyTrace(detected_at=13))
+    record = __import__('services.strategy_lab.opportunity_cost', fromlist=['evaluate']).evaluate([observation], [t])[0]
+    assert record.capture_at == 13
+    assert metrics([record])["time_to_capture_p50"] == 3
+    unknown = OpportunityTruth("u", "u1", "v", 10, 21, 20, TruthStatus.UNKNOWN, False)
+    assert metrics(__import__('services.strategy_lab.opportunity_cost', fromlist=['evaluate']).evaluate([], [unknown]))["status"] == "UNKNOWN"
