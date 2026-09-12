@@ -167,118 +167,13 @@ def _fake_child_main(
             os._exit(0)
 
         # PBLC-S1: all fake execution crosses this single provider-neutral
-        # child-only seam. The legacy inline branches below remain unreachable
-        # compatibility text until the next bounded cleanup slice.
+        # child-only seam.
         execute_fake_command_in_child(
             command,
             result_queue=result_queue,
             release_event=release_event,
             worker_generation=worker_generation,
         )
-        continue
-
-        command_id = command.get("command_id")
-        behavior = (command.get("payload") or {}).get("behavior", "success")
-
-        if behavior == "hang":
-            release_event.wait()
-            os._exit(9)
-
-        if behavior == "exit_before_result":
-            os._exit(3)
-
-        if behavior == "wait_then_succeed":
-            release_event.wait()
-            result_queue.put(
-                {
-                    "frame_kind": "COMMAND_RESULT",
-                    "command_id": command_id,
-                    "worker_generation": worker_generation,
-                    "outcome": ProviderExecutionOutcome.SUCCEEDED.value,
-                    "terminal_observed_at_monotonic_ns": time.monotonic_ns(),
-                    "terminal_at_utc": _now_utc_iso(),
-                    "provider_error_code": None,
-                    "provider_error_message": None,
-                    "normalized_provider_payload": {"echo": command_id},
-                    "diagnostic_reason": None,
-                }
-            )
-            continue
-
-        if behavior == "malformed_frame":
-            # Missing required keys entirely -- must fail parent-side
-            # protocol validation, never be interpreted as any terminal
-            # outcome.
-            result_queue.put({"frame_kind": "COMMAND_RESULT", "oops": True})
-            continue
-
-        if behavior == "oversized_frame":
-            result_queue.put(
-                {
-                    "frame_kind": "COMMAND_RESULT",
-                    "command_id": command_id,
-                    "worker_generation": worker_generation,
-                    "outcome": ProviderExecutionOutcome.SUCCEEDED.value,
-                    "terminal_observed_at_monotonic_ns": time.monotonic_ns(),
-                    "terminal_at_utc": _now_utc_iso(),
-                    "provider_error_code": None,
-                    "provider_error_message": None,
-                    "normalized_provider_payload": {"padding": "x" * 10_000_000},
-                    "diagnostic_reason": None,
-                }
-            )
-            continue
-
-        if behavior == "provider_rejected":
-            result_queue.put(
-                {
-                    "frame_kind": "COMMAND_RESULT",
-                    "command_id": command_id,
-                    "worker_generation": worker_generation,
-                    "outcome": ProviderExecutionOutcome.PROVIDER_REJECTED.value,
-                    "terminal_observed_at_monotonic_ns": time.monotonic_ns(),
-                    "terminal_at_utc": _now_utc_iso(),
-                    "provider_error_code": "SIMULATED_REJECT",
-                    "provider_error_message": "simulated provider-style rejection",
-                    "normalized_provider_payload": None,
-                    "diagnostic_reason": None,
-                }
-            )
-            continue
-
-        if behavior == "exception":
-            result_queue.put(
-                {
-                    "frame_kind": "COMMAND_RESULT",
-                    "command_id": command_id,
-                    "worker_generation": worker_generation,
-                    "outcome": ProviderExecutionOutcome.PROVIDER_EXCEPTION.value,
-                    "terminal_observed_at_monotonic_ns": time.monotonic_ns(),
-                    "terminal_at_utc": _now_utc_iso(),
-                    "provider_error_code": None,
-                    "provider_error_message": None,
-                    "normalized_provider_payload": None,
-                    "diagnostic_reason": "simulated child exception: boom",
-                }
-            )
-            continue
-
-        # default: ordinary success
-        result_queue.put(
-            {
-                "frame_kind": "COMMAND_RESULT",
-                "command_id": command_id,
-                "worker_generation": worker_generation,
-                "outcome": ProviderExecutionOutcome.SUCCEEDED.value,
-                "terminal_observed_at_monotonic_ns": time.monotonic_ns(),
-                "terminal_at_utc": _now_utc_iso(),
-                "provider_error_code": None,
-                "provider_error_message": None,
-                "normalized_provider_payload": {"echo": command_id},
-                "diagnostic_reason": None,
-            }
-        )
-
 
 # ---------------------------------------------------------------------------
 # Internal per-generation bookkeeping (parent-owned, never authoritative on

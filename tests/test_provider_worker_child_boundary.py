@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ast
 import os
+from pathlib import Path
 
 import pytest
 
@@ -63,3 +65,20 @@ def test_supervisor_has_no_provider_sdk_imports() -> None:
     assert "import futu" not in source
     assert "openquotecontext" not in source
     assert "opensectradecontext" not in source.replace(" ", "")
+
+
+def test_fake_child_main_has_one_command_execution_seam() -> None:
+    source = Path("src/services/live_feed/provider_worker_supervisor.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_fake_child_main")
+    calls = [
+        node for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "execute_fake_command_in_child"
+    ]
+    assert len(calls) == 1
+    assert not any(
+        isinstance(node, ast.Name) and node.id in {"behavior", "ProviderExecutionOutcome"}
+        for node in ast.walk(function)
+    )

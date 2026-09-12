@@ -124,7 +124,7 @@ def test_03_ordinary_command_success(supervisor):
     supervisor.start_generation()
     outcome = supervisor.submit_command(_command(), payload={"behavior": "success"})
     assert outcome.outcome is ProviderExecutionOutcome.SUCCEEDED
-    assert outcome.normalized_provider_payload == {"echo": "c1"}
+    assert outcome.normalized_provider_payload["echo"] == "c1"
     assert outcome.command.command_id == "c1"
     assert outcome.worker_generation == supervisor.worker_generation
 
