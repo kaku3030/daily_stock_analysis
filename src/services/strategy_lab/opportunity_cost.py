@@ -8,10 +8,11 @@ from enum import StrEnum
 from typing import Any, Iterable, Sequence
 
 from src.services.stock_radar_v2.execution_reality import ShadowExecutionRecord
-from src.services.stock_radar_v2.observation_ledger import Observation
+from src.services.stock_radar_v2.observation_ledger import LatencyTrace, Observation
 
 
 DEFINITION_VERSION = "opportunity-truth-v0.1"
+HARNESS_VERSION = "recall-calibration-harness-v0.1"
 
 
 class TruthStatus(StrEnum):
@@ -174,10 +175,15 @@ def time_to_capture(truth: OpportunityTruth, observation: Observation | None) ->
 
 
 def evaluate(observations: Iterable[Observation], truths: Iterable[OpportunityTruth]) -> tuple[RecallEvaluationRecord, ...]:
-    by_id = {item.observation_id: item for item in observations}
+    by_opportunity: dict[str, list[Observation]] = {}
+    for item in observations:
+        key = item.opportunity_id or (item.observation_id if item.observation_id else None)
+        if key is not None:
+            by_opportunity.setdefault(key, []).append(item)
     result = []
     for truth in truths:
-        observation = by_id.get(truth.opportunity_id)
+        candidates = by_opportunity.get(truth.opportunity_id, [])
+        observation = candidates[0] if len(candidates) == 1 else None
         result.append(RecallEvaluationRecord(
             truth.opportunity_id, observation.observation_id if observation else None, truth,
             observation is not None and observation.detector_status not in {"NOT_DETECTED", "UNKNOWN"},
@@ -186,10 +192,41 @@ def evaluate(observations: Iterable[Observation], truths: Iterable[OpportunityTr
             observation.execution_feasible if observation else None,
             observation.canonical_permission if observation else "UNKNOWN",
             observation.earliest_executable_at if observation else None,
-            attribute_miss(observation, truth),
+            MissReason.UNKNOWN if len(candidates) > 1 else attribute_miss(observation, truth),
             capture_at=observation.latency.detected_at if observation else None,
         ))
     return tuple(result)
+
+
+def calibration_summary(
+    observations: Iterable[Observation], truths: Iterable[OpportunityTruth],
+    *, dataset_id: str, execution_outcomes: Iterable[tuple[str, str]] = (),
+) -> dict[str, Any]:
+    """Stable, read-only research summary; never writes or changes observations."""
+    records = evaluate(observations, truths)
+    outcomes = dict(execution_outcomes)
+    eligible = tuple(r for r in records if r.truth.status is not TruthStatus.UNKNOWN and not r.truth.censored)
+    opportunities = tuple(r for r in eligible if r.truth.status is TruthStatus.OPPORTUNITY)
+    reasons = {reason.value: sum(r.miss_reason is reason for r in opportunities) for reason in MissReason}
+    captured = tuple(r for r in opportunities if r.detector_seen and r.strategy_eligible is True
+                     and r.portfolio_admissible is not False and r.execution_feasible is not False
+                     and r.canonical_permission == "ALLOW")
+    ttc = [value for r in captured for value in [time_to_capture(r.truth, Observation(
+        r.observation_id or "", "DETECTED", latency=LatencyTrace(detected_at=r.capture_at)))] if value is not None]
+    missed_mfe = [r.truth.mfe for r in opportunities if r not in captured and r.truth.mfe is not None]
+    return {
+        "harness_version": HARNESS_VERSION, "dataset_id": dataset_id,
+        "truth_definition_versions": sorted({r.truth.definition_version for r in records}),
+        "eligible_truth_opportunities_count": len(opportunities),
+        "detector_recall": {"numerator": sum(r.detector_seen for r in opportunities) if opportunities else None, "denominator": len(opportunities) or None},
+        "strategy_recall": {"numerator": sum(r.strategy_eligible is True for r in opportunities) if opportunities else None, "denominator": len(opportunities) or None},
+        "miss_attribution_counts": reasons,
+        "time_to_capture": {"count": len(ttc), "p50": sorted(ttc)[(len(ttc)-1)//2] if ttc else None},
+        "missed_mfe": {"count": len(missed_mfe), "mean": sum(missed_mfe)/len(missed_mfe) if missed_mfe else None},
+        "captured_opportunities": len(captured), "missed_opportunities": len(opportunities) - len(captured),
+        "execution_outcomes_count": len(outcomes),
+        "status": "KNOWN" if opportunities else "UNKNOWN",
+    }
 
 
 def metrics(records: Iterable[RecallEvaluationRecord]) -> dict[str, float | str]:
