@@ -13,6 +13,7 @@ from src.services.stock_radar_v2.observation_ledger import LatencyTrace, Observa
 
 DEFINITION_VERSION = "opportunity-truth-v0.1"
 HARNESS_VERSION = "recall-calibration-harness-v0.1"
+DATASET_CONTRACT_VERSION = "recall-calibration-dataset-v0.1"
 
 
 class TruthStatus(StrEnum):
@@ -214,17 +215,24 @@ def calibration_summary(
     ttc = [value for r in captured for value in [time_to_capture(r.truth, Observation(
         r.observation_id or "", "DETECTED", latency=LatencyTrace(detected_at=r.capture_at)))] if value is not None]
     missed_mfe = [r.truth.mfe for r in opportunities if r not in captured and r.truth.mfe is not None]
+    detector_numerator = sum(r.detector_seen for r in opportunities)
+    strategy_numerator = sum(r.strategy_eligible is True for r in opportunities)
+    attribution_total = sum(reasons.values())
     return {
         "harness_version": HARNESS_VERSION, "dataset_id": dataset_id,
         "truth_definition_versions": sorted({r.truth.definition_version for r in records}),
         "eligible_truth_opportunities_count": len(opportunities),
-        "detector_recall": {"numerator": sum(r.detector_seen for r in opportunities) if opportunities else None, "denominator": len(opportunities) or None},
-        "strategy_recall": {"numerator": sum(r.strategy_eligible is True for r in opportunities) if opportunities else None, "denominator": len(opportunities) or None},
+        "detector_recall": {"numerator": detector_numerator if opportunities else None, "denominator": len(opportunities) or None, "ratio": detector_numerator / len(opportunities) if opportunities else None},
+        "strategy_recall": {"numerator": strategy_numerator if opportunities else None, "denominator": len(opportunities) or None, "ratio": strategy_numerator / len(opportunities) if opportunities else None},
         "miss_attribution_counts": reasons,
         "time_to_capture": {"count": len(ttc), "p50": sorted(ttc)[(len(ttc)-1)//2] if ttc else None},
         "missed_mfe": {"count": len(missed_mfe), "mean": sum(missed_mfe)/len(missed_mfe) if missed_mfe else None},
         "captured_opportunities": len(captured), "missed_opportunities": len(opportunities) - len(captured),
         "execution_outcomes_count": len(outcomes),
+        "censored_count": sum(r.truth.censored for r in records),
+        "unknown_truth_count": sum(r.truth.status is TruthStatus.UNKNOWN for r in records),
+        "reconciliation": {"attribution_total": attribution_total, "opportunity_total": len(opportunities), "totals_match": attribution_total == len(opportunities)},
+        "sample_size": {"reliable": len(opportunities) >= 30, "status": "OK" if len(opportunities) >= 30 else "NOT_STATISTICALLY_RELIABLE"},
         "status": "KNOWN" if opportunities else "UNKNOWN",
     }
 
