@@ -641,7 +641,20 @@ class ProviderWorkerSupervisor:
             if self._state is SupervisorState.SHUTDOWN:
                 raise AdmissionClosedError("admission closed: shutdown already requested")
             if self._current is None or self._current.dead:
-                raise RuntimeError("no live generation; call start_generation() first")
+                generation = self._current
+                diagnostic_reason = (
+                    "previously minted worker generation is no longer usable before dispatch"
+                    if generation is not None
+                    else "no worker generation has ever been established for dispatch"
+                )
+                outcome = self._finalize_command(
+                    generation, command,
+                    ProviderExecutionOutcome.CANCELLED_GENERATION_INVALIDATED,
+                    None,
+                    diagnostic_reason=diagnostic_reason,
+                )
+                self._terminal_ledger[command.command_id] = (identity, outcome)
+                return outcome
             if self._in_flight_command_id is not None:
                 raise CommandInFlightError(
                     f"command {self._in_flight_command_id!r} is still in flight "
@@ -821,7 +834,7 @@ class ProviderWorkerSupervisor:
 
     def _finalize_command(
         self,
-        generation: _Generation,
+        generation: _Generation | None,
         command: ProviderCommand,
         outcome: ProviderExecutionOutcome,
         dispatched_at_monotonic_ns: int,
@@ -844,7 +857,7 @@ class ProviderWorkerSupervisor:
         return ResolvedProviderCommandOutcome(
             runtime_instance_id=self._runtime_instance_id,
             provider_id=self._provider_id,
-            worker_generation=generation.number,
+            worker_generation=generation.number if generation is not None else None,
             command=command,
             outcome=outcome,
             dispatched_at_monotonic_ns=dispatched_at_monotonic_ns,
