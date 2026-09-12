@@ -162,6 +162,10 @@ from .parameter_drift import (
     ParameterDriftTransition,
     evaluate_parameter_drift,
 )
+from .opportunity_cost import (
+    DEFINITION_VERSION, MissReason, OpportunityTruth, RecallEvaluationLedger, RecallEvaluationRecord,
+    TruthStatus, attribute_miss, counterfactual_execution, evaluate, metrics,
+)
 from .oos_consumption import (
     OOSBurnStatus,
     OOSClaimResult,
@@ -330,6 +334,8 @@ __all__ = [
     "ParameterDriftFinding",
     "ParameterDriftFindingCode",
     "ParameterDriftFoldObservation",
+    "DEFINITION_VERSION", "MissReason", "OpportunityTruth", "RecallEvaluationLedger", "RecallEvaluationRecord",
+    "TruthStatus", "attribute_miss", "counterfactual_execution", "evaluate", "metrics",
     "ParameterDriftReport",
     "ParameterDriftResolution",
     "ParameterDriftTransition",
