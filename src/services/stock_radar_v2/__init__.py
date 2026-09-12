@@ -9,6 +9,7 @@ from .confidence import (
 from .config import StockRadarConfig, load_stock_radar_config
 from .health import FailureKind, FallbackStateMachine, ProviderMode
 from .notifications import RadarNotification, RadarNotifier, notify
+from .observation_ledger import LatencyTrace, Observation, ObservationLedger, SourceEventAtQuality
 from .router import DebouncedMarketDataRouter
 from .runtime_notifications import NotificationServiceRadarSink
 from .technical_state import StockRadarTechnicalState, StockRadarTechnicalStateService
@@ -22,6 +23,9 @@ __all__ = [
     "FallbackStateMachine",
     "PortfolioRiskAssessment",
     "NotificationServiceRadarSink",
+    "LatencyTrace",
+    "Observation",
+    "ObservationLedger",
     "ProviderMode",
     "RadarNotification",
     "RadarNotifier",
@@ -29,6 +33,7 @@ __all__ = [
     "StockRadarConfig",
     "StockRadarTechnicalState",
     "StockRadarTechnicalStateService",
+    "SourceEventAtQuality",
     "ValidationQueue",
     "WeeklyCalibration",
     "assess_portfolio_confidence",

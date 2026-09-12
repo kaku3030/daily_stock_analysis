@@ -25,7 +25,7 @@ import markdown2
 
 PROJECT_URL = "https://github.com/ZhuLinsen/daily_stock_analysis"
 PROJECT_REPOSITORY = "ZhuLinsen/daily_stock_analysis"
-PROJECT_DISPLAY_NAME = "股票智能分析系统"
+PROJECT_DISPLAY_NAME = "Stock Razor"
 DEFAULT_XIAOHONGSHU_QR_PATH = "src/assets/share_image/xiaohongshu_qr.jpg"
 DEFAULT_XIAOHONGSHU_HANDLE = "@霸天土小豆"
 _MARKET_RE = re.compile(

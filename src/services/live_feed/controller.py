@@ -484,6 +484,25 @@ class LiveFeedController:
                 request.semantic_stream_key, request.control_plane_state, binding_strength=request.binding_strength
             )
 
+    def _provider_event_relevance_failure(self, event: ProviderEvent) -> str | None:
+        """Return the frozen identity invariant violated by `event`, if any.
+
+        Provider callbacks are evidence only. Before any such evidence may
+        mutate controller truth, it must belong to this runtime, provider,
+        and the controller's current connection generation. This is the
+        structural guard for frozen adversarial Case 6 and restart trust
+        reset semantics; mismatched evidence remains diagnostic only.
+        """
+
+        self._assert_writer_context()
+        if event.runtime_instance_id != self._runtime_instance_id:
+            return "RUNTIME_INSTANCE_MISMATCH"
+        if event.provider_id != self._provider_id:
+            return "PROVIDER_MISMATCH"
+        if event.controller_generation != self._controller_generation.value:
+            return "CONTROLLER_GENERATION_MISMATCH"
+        return None
+
     def _apply_event_as_writer(self, event: ProviderEvent) -> None:
         """Slice 1's only lifecycle logic (F5): once stop has been
         applied, no event may advance lifecycle into an active/recovery
@@ -494,6 +513,15 @@ class LiveFeedController:
         """
 
         self._assert_writer_context()
+        relevance_failure = self._provider_event_relevance_failure(event)
+        if relevance_failure is not None:
+            with self._authoritative_lock:
+                self._findings.append(
+                    f"STALE_PROVIDER_EVENT: reason={relevance_failure} "
+                    f"kind={event.event_kind.value} seq={event.local_enqueue_seq} ignored, no lifecycle change"
+                )
+            return
+
         with self._authoritative_lock:
             if self._stop_requested:
                 if event.event_kind is ProviderEventKind.DISCONNECTED:
@@ -518,6 +546,24 @@ class LiveFeedController:
                 self._lifecycle_state = LifecycleState.RECONNECTING
             elif event.event_kind is ProviderEventKind.ERROR:
                 self._failure_class = FailureClass.UNKNOWN
+            elif event.event_kind is ProviderEventKind.DATA:
+                # DATA is market-data ingress, not control evidence. Slice 1
+                # has no currentness/continuity consumer for it yet, so it
+                # reaching the writer is expected and is deliberately not
+                # flagged here (its loss already has an explicit
+                # INGRESS_LOSS overflow finding). No lifecycle or
+                # DeliveryMode semantics are implied.
+                pass
+            else:
+                # Fail-loud (frozen contract section 16): any other control /
+                # priority evidence kind that reaches the writer with no
+                # semantic handler (ENTITLEMENT, SUBSCRIPTION_RESULT,
+                # HEARTBEAT, TRANSPORT_RECONNECTING, or any future kind)
+                # must never be silently dropped. This emits an explicit
+                # diagnostic finding only -- no lifecycle mutation, no
+                # DeliveryMode / REALTIME inference, no authoritative
+                # state change.
+                self._findings.append(f"UNHANDLED_EVIDENCE_KIND:{event.event_kind.value}")
 
     def _transition_lifecycle_state(self, new_state: LifecycleState) -> None:
         """Guarded transition primitive. No caller in this module ever

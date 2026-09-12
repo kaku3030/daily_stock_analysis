@@ -1,0 +1,24 @@
+{
+  "source_revision": "ef27aec4d8f5cb89093399081fcd5e750473f99c",
+  "calendar_identity": "fixture.trading_day_map",
+  "source_identity": "US.NVDA / fixture",
+  "unknown_or_absence_rows": ["US_CALENDAR_EMPTY_07", "US_MISSING_INVALID_11"],
+  "rows": [
+    {"fixture_id": "US_PREOPEN_01", "classification": "MATCH"},
+    {"fixture_id": "US_INTRADAY_15M_02", "classification": "MATCH"},
+    {"fixture_id": "US_INTRADAY_1H_03", "classification": "MATCH"},
+    {"fixture_id": "US_DAILY_04", "classification": "MATCH"},
+    {"fixture_id": "US_OLDER_05", "classification": "MATCH"},
+    {"fixture_id": "US_AHEAD_06", "classification": "MATCH"},
+    {"fixture_id": "US_CALENDAR_EMPTY_07", "classification": "SPEC_GAP", "evidence": "calendar absent"},
+    {"fixture_id": "US_WEEKEND_HOLIDAY_08", "classification": "MATCH"},
+    {"fixture_id": "US_DST_09", "classification": "MATCH"},
+    {"fixture_id": "US_HALF_DAY_10", "classification": "MATCH"},
+    {"fixture_id": "US_MISSING_INVALID_11", "classification": "SPEC_GAP", "evidence": "latest bar absent"}
+  ],
+  "e06": {
+    "semantic_owner": "realtime_monitor.server._data_health_check_core",
+    "read_set": ["latest_bar_time", "now_et", "timeframe", "trading_day_map"],
+    "net_complexity_result": "SMALLER"
+  }
+}

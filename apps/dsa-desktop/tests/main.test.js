@@ -791,8 +791,8 @@ test('auto download prompt falls back to error when install path fails', async (
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa desktop updater '));
   const exeDir = path.join(tempRoot, 'app');
   const userDataDir = path.join(tempRoot, 'userData');
-  const exePath = path.join(exeDir, 'Daily Stock Analysis.exe');
-  const uninstallPath = path.join(exeDir, 'Uninstall Daily Stock Analysis.exe');
+  const exePath = path.join(exeDir, 'Stock Razor.exe');
+  const uninstallPath = path.join(exeDir, 'Uninstall Stock Razor.exe');
   const envFile = path.join(exeDir, '.env');
   const backupRoot = path.join(userDataDir, '.dsa-desktop-update-backup');
   const originalRemove = fs.rmSync;

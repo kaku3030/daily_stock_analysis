@@ -17,7 +17,7 @@
   },
   "build": {
     "appId": "com.daily-stock-analysis.desktop",
-    "productName": "Daily Stock Analysis",
+    "productName": "Stock Razor",
     "directories": {
       "output": "dist"
     },

@@ -1462,7 +1462,8 @@ function isWindowsNsisInstalledApp() {
   }
 
   const appDir = path.dirname(app.getPath('exe'));
-  return fs.existsSync(path.join(appDir, 'Uninstall Daily Stock Analysis.exe'));
+  return ['Uninstall Stock Razor.exe', 'Uninstall Daily Stock Analysis.exe']
+    .some((name) => fs.existsSync(path.join(appDir, name)));
 }
 
 function getElectronAutoUpdater() {
