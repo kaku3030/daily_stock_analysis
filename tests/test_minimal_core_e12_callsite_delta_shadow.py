@@ -26,10 +26,12 @@ def test_e12_wrapper_deletion_has_smaller_call_surface() -> None:
     tree = ast.parse(BASE.read_text(encoding="utf-8"))
     call_counts = _calls_by_name(tree, WRAPPERS)
 
-    assert call_counts == {name: 0 for name in WRAPPERS}
-    assert sum(call_counts.values()) == 0
+    # Three wrapper definitions remain, with three call sites each in the
+    # market-tag, daily-routing, and realtime-routing paths.
+    assert call_counts == {name: 3 for name in WRAPPERS}
+    assert sum(call_counts.values()) == 9
 
     # One get_suffix_market lookup per path would replace the three mutually
     # exclusive suffix checks, reducing wrapper-call expressions by six.
     shadow_calls = 3
-    assert shadow_calls == 3
+    assert sum(call_counts.values()) - shadow_calls == 6

@@ -14,6 +14,9 @@ import pytest
 from data_provider.base import (
     _is_hk_market,
     _is_us_market,
+    _is_jp_market,
+    _is_kr_market,
+    _is_tw_market,
     _market_tag,
 )
 from data_provider.us_index_mapping import is_us_index_code, is_us_stock_code
@@ -36,12 +39,11 @@ def _current_route(code: str) -> RouteDecision:
     is_us_index = is_us_index_code(code)
     is_us = is_us_index or is_us_stock_code(code)
     is_hk = (not is_us) and _is_hk_market(code)
-    suffix_market = None if is_us or is_hk else get_suffix_market(code)
-    is_jp = suffix_market == "jp"
-    is_kr = suffix_market == "kr"
-    is_tw = suffix_market == "tw"
+    is_jp = (not is_us) and (not is_hk) and _is_jp_market(code)
+    is_kr = (not is_us) and (not is_hk) and _is_kr_market(code)
+    is_tw = (not is_us) and (not is_hk) and _is_tw_market(code)
     market = "us" if is_us else "hk" if is_hk else "jp" if is_jp else "kr" if is_kr else "tw" if is_tw else "cn"
-    return RouteDecision(market, is_us, is_hk, is_jp, is_kr, is_tw, 3, 1)
+    return RouteDecision(market, is_us, is_hk, is_jp, is_kr, is_tw, 5, 3)
 
 
 def _shadow_route(code: str) -> RouteDecision:
@@ -84,9 +86,9 @@ def test_e12_full_routing_differential_matches_current(symbol: str) -> None:
 def test_e12_shadow_net_complexity_is_smaller_for_both_routing_paths() -> None:
     current = _current_route("7203.T")
     shadow = _shadow_route("7203.T")
-    assert current.lookups == 1
+    assert current.lookups == 3
     assert shadow.lookups == 1
-    assert current.branches == 3
+    assert current.branches == 5
     assert shadow.branches == 3
 
 

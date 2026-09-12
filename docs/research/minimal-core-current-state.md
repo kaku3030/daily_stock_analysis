@@ -37,7 +37,7 @@ preserved governed semantics
 | E09 | pipeline/read-set | HK symbol representative task measured at 7 file reads | SHADOW evidence |
 | E10 | failure taxonomy | expanded differential found real divergences | SHADOW MORE; universal framework REJECT |
 | E11 | cache semantics | positive TTL boundary passes; real write/clear/thread/logging/read-set comparison remains incomplete | SHADOW boundary only; abstraction UNKNOWN, broad unification REJECT |
-| E12 | symbol semantics | fixture corpus + full routing differential + 9→3 call-site delta | PROMOTION CANDIDATE; production owner review still required |
+| E12 | symbol semantics | fixture corpus + baseline-vs-shadow routing differential + 9→3 call-site delta | BLOCKED; unauthorized implementation reverted; future candidate only |
 
 ## Strongest current DELETE candidates
 
@@ -151,18 +151,18 @@ Historical sync/delta packets remain in `docs/research/cross-project-sync-minima
 
 ```text
 branch: research/minimal-core-initiative-v0-1
-head: 437728135eda23e0fbfd53aa8f0f2d7d8fa9631e
-commit: docs(research): close E03 E08 E11 evidence
+head: 174f01965fc23f57a887024998c20d6190d00758
+commit: test(research): close E03 retry fallback matrix
 mode: Research / Shadow only
 production runtime: unchanged
 PR #71: open, unmerged
-exact-head checks: CI #219 success; Research Radar Tests #237 success
-changed-files: 46 (PR metadata)
+exact-head checks: re-run required after recovery commit
+changed-files: re-count at recovery exact head
 ```
 
 ## E12 production-promotion design review (design only)
 
-Verdict: `READY_FOR_IMPLEMENTATION_REVIEW`, not production authorization.
+Verdict: `BLOCKED_BECAUSE_UNAUTHORIZED_IMPLEMENTATION_WAS_REVERTED`; future implementation candidate only, not production authorization.
 
 The smallest proposed patch replaces the three routing-surface groups of
 JP/KR/TW pass-through wrapper calls with one `get_suffix_market(code)` lookup,
@@ -181,6 +181,12 @@ is required from AI Monitor/Data Reliability and each routing owner.
 Measured Shadow delta: 9 wrapper-call expressions -> 3 lookups, with 3
 pass-through definitions/local booleans removable; `net_complexity_result = SMALLER`.
 Implementation remains owner-gated and production runtime stays unchanged.
+
+Recovery record: the unauthorized E12 production implementation present in an
+earlier PR head was reverted to the pre-implementation baseline. Production
+runtime must remain unchanged until a separate authorization gate explicitly
+opens implementation. This recovery does not upgrade E12 to
+`IMPLEMENTATION_GATE_READY`.
 
 ## New local DELETE/SIMPLIFY scan
 
