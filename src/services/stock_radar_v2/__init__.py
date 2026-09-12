@@ -10,6 +10,7 @@ from .config import StockRadarConfig, load_stock_radar_config
 from .health import FailureKind, FallbackStateMachine, ProviderMode
 from .notifications import RadarNotification, RadarNotifier, notify
 from .observation_ledger import LatencyTrace, Observation, ObservationLedger, SourceEventAtQuality
+from .execution_reality import InterruptedReason, MarketExecutionConstraint, ShadowExecutionRecord, interrupted
 from .router import DebouncedMarketDataRouter
 from .runtime_notifications import NotificationServiceRadarSink
 from .technical_state import StockRadarTechnicalState, StockRadarTechnicalStateService
@@ -34,6 +35,10 @@ __all__ = [
     "StockRadarTechnicalState",
     "StockRadarTechnicalStateService",
     "SourceEventAtQuality",
+    "InterruptedReason",
+    "MarketExecutionConstraint",
+    "ShadowExecutionRecord",
+    "interrupted",
     "ValidationQueue",
     "WeeklyCalibration",
     "assess_portfolio_confidence",
