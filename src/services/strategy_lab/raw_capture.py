@@ -20,6 +20,7 @@ from .strict_json import loads_strict_json
 
 RAW_CAPTURE_SCHEMA_VERSION = "raw-provider-capture-v0.1"
 RAW_CAPTURE_MANIFEST_VERSION = "raw-provider-capture-manifest-v0.1"
+RAW_CAPTURE_MANIFEST_VERSION_V2 = "raw-provider-capture-manifest-v0.2"
 NORMALIZATION_LINEAGE_VERSION = "raw-normalization-lineage-v0.1"
 
 STATUS_OK = "OK"
@@ -69,6 +70,7 @@ _MANIFEST_KEYS = frozenset(
         "sealed_at_utc",
     }
 )
+_MANIFEST_KEYS_V2 = _MANIFEST_KEYS | {"authority_receipt_sha256"}
 
 
 def _exact_keys(payload: Mapping[str, Any], expected: frozenset[str], label: str) -> None:
@@ -350,9 +352,10 @@ class RawCaptureManifest:
     artifact_filename: str
     artifact_sha256: str
     sealed_at: datetime
+    authority_receipt_sha256: str | None = None
 
     def __post_init__(self) -> None:
-        if self.schema_version != RAW_CAPTURE_MANIFEST_VERSION:
+        if self.schema_version not in (RAW_CAPTURE_MANIFEST_VERSION, RAW_CAPTURE_MANIFEST_VERSION_V2):
             raise ValueError(f"unsupported raw capture manifest: {self.schema_version}")
         _trimmed(self.capture_id, "capture_id")
         filename = _trimmed(self.artifact_filename, "artifact_filename")
@@ -363,15 +366,28 @@ class RawCaptureManifest:
         assert sealed is not None
         object.__setattr__(self, "sealed_at", sealed)
 
+        if self.schema_version == RAW_CAPTURE_MANIFEST_VERSION_V2:
+            _hex(self.authority_receipt_sha256, "authority_receipt_sha256", 64)
+        elif self.authority_receipt_sha256 is not None:
+            # A legacy manifest can never carry a contemporaneous anchor: if it
+            # did not seal one originally, no later construction may add it.
+            raise ValueError("legacy raw capture manifest cannot carry an authority receipt anchor")
+
+    @property
+    def is_authority_receipt_anchored(self) -> bool:
+        return self.schema_version == RAW_CAPTURE_MANIFEST_VERSION_V2
+
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "RawCaptureManifest":
-        _exact_keys(payload, _MANIFEST_KEYS, "raw capture manifest")
+        expected = _MANIFEST_KEYS_V2 if payload.get("schema_version") == RAW_CAPTURE_MANIFEST_VERSION_V2 else _MANIFEST_KEYS
+        _exact_keys(payload, expected, "raw capture manifest")
         return cls(
             schema_version=payload["schema_version"],
             capture_id=payload["capture_id"],
             artifact_filename=payload["artifact_filename"],
             artifact_sha256=payload["artifact_sha256"],
             sealed_at=_parse_aware(payload["sealed_at_utc"], "sealed_at_utc"),
+            authority_receipt_sha256=payload.get("authority_receipt_sha256"),
         )
 
 
@@ -440,11 +456,57 @@ class SealedRawCapture:
             raise ValueError("sealed raw capture is not verified") from exc
 
     def pit_binding(self, observation_id: str) -> tuple[datetime, datetime]:
-        observation = self._verified_artifact().observation(observation_id)
-        if not observation.pit_eligible:
-            raise ValueError("observation is not eligible for point-in-time normalization")
-        assert observation.available_at is not None and observation.observed_at is not None
-        return observation.available_at, observation.observed_at
+        return pit_binding_for_observation(self._verified_artifact(), observation_id)
+
+    def verify_authority_receipt_anchor(self, receipt_bytes: bytes) -> None:
+        """Prove ``receipt_bytes`` match the manifest's contemporaneous anchor.
+
+        A legacy (v0.1) manifest never sealed an anchor, so it fails closed
+        here unconditionally: no later receipt, however internally valid,
+        can retroactively become the one this capture was sealed with.
+        """
+
+        manifest = self.manifest
+        if not manifest.is_authority_receipt_anchored:
+            raise ValueError(
+                "raw capture manifest has no contemporaneous authority receipt "
+                "anchor (legacy manifest version); a later receipt cannot be "
+                "retroactively bound to this capture"
+            )
+        if not isinstance(receipt_bytes, bytes) or not receipt_bytes:
+            raise ValueError("authority receipt bytes are required for anchor verification")
+        actual = sha256(receipt_bytes).hexdigest()
+        if actual != manifest.authority_receipt_sha256:
+            raise ValueError(
+                "authority receipt anchor mismatch: receipt bytes do not match "
+                "the manifest's sealed anchor"
+            )
+
+
+def pit_binding_for_observation(
+    artifact: RawCaptureArtifact, observation_id: str
+) -> tuple[datetime, datetime]:
+    observation = artifact.observation(observation_id)
+    if not observation.pit_eligible:
+        raise ValueError("observation is not eligible for point-in-time normalization")
+    assert observation.available_at is not None and observation.observed_at is not None
+    return observation.available_at, observation.observed_at
+
+
+def parse_and_digest_raw_capture_artifact(artifact_bytes: bytes) -> tuple[RawCaptureArtifact, str]:
+    """Pure pre-seal helper: derive verified artifact facts directly from bytes.
+
+    Exists so capture-time evidence (e.g. an authority receipt) can be built
+    from already-validated raw bytes *before* a manifest exists, keeping the
+    manifest anchor's hash dependency acyclic (bytes -> receipt -> anchor,
+    never the reverse).
+    """
+
+    if not isinstance(artifact_bytes, bytes) or not artifact_bytes:
+        raise ValueError("raw capture artifact bytes are required")
+    digest = sha256(artifact_bytes).hexdigest()
+    artifact = RawCaptureArtifact.from_mapping(_strict_json_loads(artifact_bytes, "raw capture artifact"))
+    return artifact, digest
 
 
 def load_sealed_raw_capture(
