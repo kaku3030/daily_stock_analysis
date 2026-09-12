@@ -85,6 +85,11 @@ class Observation:
     portfolio_admissible: bool | None = None
     portfolio_block_reasons: tuple[str, ...] = ()
     execution_feasible: bool | None = None
+    execution_record_id: str | None = None
+    interrupted_reason: str | None = None
+    decision_available_at: float | None = None
+    confirmed_at: float | None = None
+    earliest_executable_at: float | None = None
     canonical_permission: str = "UNKNOWN"
     later_outcome_label: str | None = None
     censored: bool = False
@@ -92,6 +97,13 @@ class Observation:
     mae: float | None = None
     universe_snapshot_id: str | None = None
     latency: LatencyTrace = field(default_factory=LatencyTrace)
+    opportunity_id: str | None = None
+
+    def __post_init__(self) -> None:
+        known = [value for value in (self.decision_available_at, self.confirmed_at) if value is not None]
+        if self.earliest_executable_at is not None and known:
+            if self.earliest_executable_at < max(known):
+                raise ValueError("earliest_executable_at cannot precede decision availability")
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
