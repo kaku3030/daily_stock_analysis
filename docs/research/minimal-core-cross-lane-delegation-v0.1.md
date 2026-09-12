@@ -5,6 +5,12 @@
 **Canonical initiative PR:** #71  
 **Production behavior change:** none by this document  
 
+`AI_MONITOR_PROVIDER_RUNTIME_PRODUCTION_APPROVAL_AUTHORITY = @kaku3030`. Valid
+sign-off is an owner GitHub PR `APPROVED` review on the exact head, with the
+review body confirming the concrete production scope, rollback, and ownership
+boundary. A head change invalidates that approval; owner sign-off is not user
+explicit authorization to implement.
+
 ## 1. Objective
 
 Run Minimal Core work in parallel across the existing AI Monitor and Radar lanes instead of creating a new independent project lane.
