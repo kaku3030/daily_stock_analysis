@@ -1,8 +1,6 @@
 # Fix Issue
 
-基于 issue 分析结果实现修复，并按仓库规则补齐验证、风险与回滚说明。
-
-**Repository**: https://github.com/ZhuLinsen/daily_stock_analysis
+基于已确认 issue 或 diagnosis 结果做最小修复，并补齐 acceptance evidence、验证、风险与回滚。规则真源是 `AGENTS.md`；执行架构参考 `docs/ai-collaboration-architecture.md`。
 
 ## Usage
 
@@ -12,109 +10,97 @@
 
 ## Prerequisites
 
-优先先完成 `/analyze-issue <issue_number>`，确保问题成立且边界清晰。
+优先先完成 `/analyze-issue`。根因不明、复现不稳定或涉及时序/currentness/provider 等复杂路径时，先执行 `/diagnose-bug`。
 
-## Instructions
-
-### Step 1: 确认分析基线
-
-检查 `.claude/reviews/issues/issue-<number>.md` 是否存在；如果不存在，先补做 issue 分析或在本次修复中补齐最小分析结论。
-
-### Step 2: 同步最新代码基线并选择安全的工作方式
-
-开始修复或准备创建 / 更新 PR 前，先按 `AGENTS.md` 拉新：
+## Step 1: Resolve repository and analysis baseline
 
 ```bash
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
 git status --short
 git fetch --all --prune
-# 仅当工作区干净且当前分支可 fast-forward 时执行：
+# 仅当工作区干净且可 fast-forward 时：
 git pull --ff-only
 ```
 
-- 默认基于当前工作树做最小相关改动
-- 只有在工作区干净、当前分支有可 fast-forward 的上游时，才执行并接受 `git pull --ff-only` 的结果
-- 如存在本地改动、冲突状态、未跟踪风险文件、无上游分支或无法 fast-forward，不要执行 `stash`、`reset`、强制切分支或覆盖本地状态；先记录本地 HEAD、使用的远端基线与无法更新本地工作树的原因
-- 若后续要创建 / 更新 PR，先说明当前分支与目标基线差异；必要时请求用户确认 rebase、merge 或继续基于当前分支推进
-- 不要默认切换分支或改写用户当前工作状态
-- 如果用户明确要求建分支，再执行最小必要的分支操作
+禁止硬编码历史 repository。仓库身份无法确认时 fail-loud。
 
-### Step 3: 实施修复
+检查 `.claude/reviews/issues/issue-<number>.md` 或用户指定 diagnosis/spec；如果不存在，先补齐最小成立性与影响边界。不要在 implementation 阶段重新设计已经冻结的 contract。
 
-- 根据 issue 结论定位相关文件
-- 优先复用现有模块、配置入口、脚本和测试
-- 保持默认行为向后兼容，避免破坏 fallback / fail-open
-- 如果修复涉及用户可见行为、配置语义、CLI/API、部署、通知、报告结构，要同步更新相关文档、`docs/CHANGELOG.md`、`.env.example`
-- 向 `docs/CHANGELOG.md` 写入条目时，在 `[Unreleased]` 段追加一行，格式为 `- [类型] 描述`，其中 `[类型]` 从 `[新功能]/[改进]/[修复]/[文档]/[测试]/[chore]` 中按本次变更内容选择；只有修复 bug 时才使用 `[修复]`；**不要**在 `[Unreleased]` 内新增 `### 类目标题`
-- `README.md` 只承载项目定位、核心能力、快速开始、主要入口、赞助/合作等首页级信息；非必要不更新 README，避免持续膨胀
-- 更细的模块行为、页面交互、专题配置、排障说明、字段契约、实现语义和边界条件，优先更新对应 `docs/*.md`
+## Step 2: Pin the proving seam
 
-### Step 4: 按改动面验证
+实施前明确：
 
-按 `AGENTS.md` 的验证矩阵执行最接近的检查：
+```text
+Exact symptom / desired behavior:
+Highest practical test seam:
+Red-capable loop or before/after evidence:
+```
 
-- 后端优先：`./scripts/ci_gate.sh`
-- 最低后端要求：`python -m py_compile <changed_python_files>`
-- 前端：`cd apps/dsa-web && npm ci && npm run lint && npm run build`
-- 桌面端：先构建 Web，再构建桌面端
+Bug 有正确 seam 时，先让 regression test 或 replay 在修复前失败。若不存在正确 seam，明确记录 architecture gap，不用浅层 test 制造假安全感。
 
-如无法完成完整验证，必须记录缺口、原因与潜在风险。
+## Step 3: Implement the minimum contract-level fix
 
-### Step 5: 更新 issue 分析文档
+- 优先修复最上游、最权威的 contract，而不是在多个 caller 逐个 patch。
+- 复用现有 module/config/schema/test fixture。
+- 保持默认行为与 compatibility/fallback，除非 issue 明确要求变化。
+- 不夹带 unrelated refactor。
+- 用户可见行为、配置语义、CLI/API、部署、通知、报告结构变化按 `AGENTS.md` 同步 docs / `.env.example` / `docs/CHANGELOG.md`。
+- timestamp/currentness/provider/restart/portfolio truth 等高风险语义必须保留 UNKNOWN/fail-loud 约束，不用方便的默认值消除不确定性。
 
-在 `.claude/reviews/issues/issue-<number>.md` 中补充：
+## Step 4: Validate narrowly, then widen as required
+
+顺序：
+
+1. 原始 repro / tight loop；
+2. regression test / targeted fixture；
+3. affected-module checks；
+4. `AGENTS.md` 验证矩阵要求的更广 CI/build。
+
+如无法完成某项验证，记录原因、UNKNOWN 与风险。不要用未运行的命令冒充 evidence。
+
+## Step 5: Update analysis artifact
+
+在 `.claude/reviews/issues/issue-<number>.md` 追加：
 
 ```markdown
 ## Fix Implementation
 
-**Date**: YYYY-MM-DD
-
 ### Changes Made
+- ...
 
-- 文件与改动点：
+### Acceptance Evidence
+- original symptom:
+- proof after fix:
 
 ### Validation
-
-- 已执行：
-- 未执行：
+- executed:
+- not executed / UNKNOWN:
 
 ### Risks
-
-- 风险点：
+- ...
 
 ### Rollback
-
-- 回滚方式：
+- ...
 ```
 
-### Step 6: 需要确认的后续动作
+## Step 6: Self-review
 
-如用户要求创建 PR、生成 PR 标题或整理 PR 描述，PR title 建议遵循 `AGENTS.md`：
+交付前检查三个轴：
 
-- 使用 `<类型>: <修改内容>` 格式，例如 `fix: 修复大盘分析历史记录丢失`
-- 类型优先使用 `fix`/`feat`/`refactor`/`docs`/`chore`/`test`/`ci`
-- 标题只描述实际改动，建议不添加 `[codex]`、`codex`、`autocode`、`copilot` 或其他工具/agent 来源前缀
-- 该约定仅用于协作一致性，不应被单独当作 process blocker
+- **Standards**：是否符合 `AGENTS.md`、兼容性和最小改动原则；
+- **Spec**：是否真正解决 issue，且无 scope creep；
+- **Runtime / Data Semantics**：相关时是否正确处理 timestamp/currentness/provider/fallback/restart/persistence/schema meaning。
 
-只有在用户明确确认后，才执行：
+随后可使用 `/analyze-pr` 做独立审查。
 
-- 建分支
-- `git commit`
-- `git push`
-- 创建 PR
-- 在 issue 下回复或关闭 issue
+## Allowed Auto-Actions
 
-## Allowed Auto-Actions (No Confirmation Needed)
-
-- 阅读和分析代码
-- 执行 `git fetch --all --prune`，并在工作区干净且可 fast-forward 时执行 `git pull --ff-only`
-- 应用与当前任务直接相关的最小修复
-- 运行非破坏性的本地验证
-- 更新本地 issue 分析文档
+- 阅读和分析代码；
+- 安全 fetch/pull；
+- 实施当前 issue 直接需要的最小修复；
+- 运行非破坏性验证；
+- 更新本地 analysis artifact。
 
 ## Actions Requiring Confirmation
 
-1. 切换或创建分支
-2. `git commit`
-3. `git push`
-4. 创建 PR
-5. 回复或关闭 issue
+遵循 `AGENTS.md`。切换/创建分支、commit、push、创建 PR、回复或关闭 issue 等写操作需要用户明确授权。

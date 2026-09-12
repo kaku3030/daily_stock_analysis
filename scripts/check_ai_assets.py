@@ -13,6 +13,7 @@ CLAUDE = ROOT / "CLAUDE.md"
 COPILOT = ROOT / ".github" / "copilot-instructions.md"
 INSTRUCTIONS_DIR = ROOT / ".github" / "instructions"
 CLAUDE_SKILLS_DIR = ROOT / ".claude" / "skills"
+AI_COLLAB_DOC = ROOT / "docs" / "ai-collaboration-architecture.md"
 
 REQUIRED_INSTRUCTION_FILES = {
     "backend.instructions.md",
@@ -24,7 +25,12 @@ REQUIRED_SKILL_FILES = {
     "README.md",
     "analyze-issue/SKILL.md",
     "analyze-pr/SKILL.md",
+    "diagnose-bug/SKILL.md",
     "fix-issue/SKILL.md",
+    "handoff/SKILL.md",
+    "implement-ticket/SKILL.md",
+    "to-spec/SKILL.md",
+    "to-tickets/SKILL.md",
 }
 
 REQUIRED_GITIGNORE_SNIPPETS = (
@@ -80,6 +86,8 @@ def ensure_instruction_files() -> None:
 
 def ensure_skill_files() -> None:
     ensure_file_exists(CLAUDE_SKILLS_DIR, "Claude skills directory")
+    ensure_file_exists(AI_COLLAB_DOC, "AI collaboration architecture doc")
+
     for relative_path in REQUIRED_SKILL_FILES:
         path = CLAUDE_SKILLS_DIR / relative_path
         if not path.exists():
@@ -88,6 +96,10 @@ def ensure_skill_files() -> None:
             content = path.read_text(encoding="utf-8")
             if relative_path != "README.md" and "AGENTS.md" not in content:
                 fail(f"{path.relative_to(ROOT)} must reference AGENTS.md as the rule source")
+
+    readme = (CLAUDE_SKILLS_DIR / "README.md").read_text(encoding="utf-8")
+    if "docs/ai-collaboration-architecture.md" not in readme:
+        fail(".claude/skills/README.md must point to the AI collaboration architecture doc")
 
 
 def ensure_gitignore_rules() -> None:
