@@ -581,6 +581,18 @@ class LiveFeedController:
                 items = [self._command_queue.popleft() for _ in range(min(max_items, len(self._command_queue)))]
             return items
 
+    def peek_command_for_worker(self) -> ProviderCommand | None:
+        """Return the queue head without transferring ownership."""
+        with self._command_queue_lock:
+            return self._command_queue[0] if self._command_queue else None
+
+    def ack_command_for_worker(self, command_id: str) -> ProviderCommand:
+        """Remove exactly the previously peeked queue head after acceptance."""
+        with self._command_queue_lock:
+            if not self._command_queue or self._command_queue[0].command_id != command_id:
+                raise RuntimeError("worker acknowledgement did not match queue head")
+            return self._command_queue.popleft()
+
     def _stage_command_result(self, result: ProviderCommandResult) -> None:
         """Registered as the executor's result sink. Runs on whatever
         thread the executor/worker delivers a result from -- it must NOT

@@ -241,7 +241,7 @@ def test_a_to_f_outcome_mapping(fake_stack, outcome_kind, kwargs, expected_error
 
 def test_g_never_started_generation_worker_generation_none(real_supervisor):
     controller, adapter = _controller_with(real_supervisor)
-    controller.submit_command(ProviderCommandType.SUBSCRIBE)
+    first = controller.submit_command(ProviderCommandType.SUBSCRIBE)
 
     adapter.start()
     assert _wait_until(lambda: (controller.process_pending() or True) and len(controller.command_results) >= 1)
@@ -261,7 +261,7 @@ def test_h_dead_real_generation_worker_generation_preserved(real_supervisor):
     assert real_supervisor._hard_kill(real_supervisor._current)  # white-box: force confirmed death
 
     controller, adapter = _controller_with(real_supervisor)
-    controller.submit_command(ProviderCommandType.SUBSCRIBE)
+    cmd = controller.submit_command(ProviderCommandType.SUBSCRIBE)
 
     adapter.start()
     assert _wait_until(lambda: (controller.process_pending() or True) and len(controller.command_results) >= 1)
@@ -342,7 +342,7 @@ def test_j_stop_during_in_flight_submit_lets_current_command_finish(fake_stack):
 
 def test_k_supervisor_fatal_error_no_terminal_fact_and_dead(fake_stack):
     supervisor, controller, adapter = fake_stack
-    controller.submit_command(ProviderCommandType.SUBSCRIBE)
+    first = controller.submit_command(ProviderCommandType.SUBSCRIBE)
     second = controller.submit_command(ProviderCommandType.UNSUBSCRIBE)
 
     dispatched = threading.Event()
@@ -359,22 +359,16 @@ def test_k_supervisor_fatal_error_no_terminal_fact_and_dead(fake_stack):
     assert adapter.is_dead is True
     assert adapter.is_running is False
     controller.process_pending()
-    results = controller.command_results
-    assert len(results) == 1
-    result = results[0]
-    assert result.provider_execution_outcome is None
-    assert result.succeeded is False
-    assert result.error == ADAPTER_SUPERVISOR_FATAL
-    assert result.diagnostic_reason == ADAPTER_SUPERVISOR_FATAL
-    # the second queued command was never dequeued/dispatched
+    assert controller.command_results == ()
+    # Neither command was accepted: both queue heads remain authoritative.
     assert len(supervisor.calls) == 1
     remaining = controller.drain_commands_for_worker()
-    assert [c.command_id for c in remaining] == [second.command_id]
+    assert [c.command_id for c in remaining] == [first.command_id, second.command_id]
 
 
 def test_admission_closed_error_no_terminal_fact_and_dead(fake_stack):
     supervisor, controller, adapter = fake_stack
-    controller.submit_command(ProviderCommandType.SUBSCRIBE)
+    cmd = controller.submit_command(ProviderCommandType.SUBSCRIBE)
 
     dispatched = threading.Event()
 
@@ -389,10 +383,8 @@ def test_admission_closed_error_no_terminal_fact_and_dead(fake_stack):
 
     assert adapter.is_dead is True
     controller.process_pending()
-    result = controller.command_results[0]
-    assert result.provider_execution_outcome is None
-    assert result.succeeded is False
-    assert result.error == ADAPTER_ADMISSION_CLOSED
+    assert controller.command_results == ()
+    assert [c.command_id for c in controller.drain_commands_for_worker()] == [cmd.command_id]
 
 
 # ---------------------------------------------------------------------------

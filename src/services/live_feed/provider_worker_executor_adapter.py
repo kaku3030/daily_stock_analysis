@@ -40,6 +40,7 @@ No replacement/retry/replay. No Currentness/Continuity/Health mutation.
 from __future__ import annotations
 
 import threading
+import logging
 from datetime import datetime, timezone
 from typing import Callable
 
@@ -73,6 +74,7 @@ ADAPTER_SUPERVISOR_FATAL = "ADAPTER_SUPERVISOR_FATAL"
 # arbitrary sleep -- stop() is observed with at most this much latency,
 # and immediately if the event is already set.
 _IDLE_POLL_SECONDS = 0.02
+_LOGGER = logging.getLogger(__name__)
 
 
 def _default_now_utc() -> datetime:
@@ -198,11 +200,11 @@ class ExecutorAdapter:
         controller = self._controller
         assert controller is not None  # guaranteed by start()'s own check
         while not self._stop_event.is_set():
-            commands = controller.drain_commands_for_worker(max_items=1)
-            if not commands:
+            command = controller.peek_command_for_worker()
+            if command is None:
                 self._stop_event.wait(_IDLE_POLL_SECONDS)
                 continue
-            if not self._dispatch_one(commands[0]):
+            if not self._dispatch_one(command):
                 return
 
     def _dispatch_one(self, command: ProviderCommand) -> bool:
@@ -212,11 +214,13 @@ class ExecutorAdapter:
         try:
             outcome = self._supervisor.submit_command(command)
         except AdmissionClosedError:
-            self._deliver(self._admission_result(command, ADAPTER_ADMISSION_CLOSED))
+            # Admission was never accepted: retain the queue head.  The
+            # Supervisor remains the sole authority for terminal facts.
+            _LOGGER.error("ExecutorAdapter admission closed for command_id=%s", command.command_id)
             self._mark_dead()
             return False
         except SupervisorFatalError:
-            self._deliver(self._admission_result(command, ADAPTER_SUPERVISOR_FATAL))
+            _LOGGER.error("ExecutorAdapter supervisor fatal before acceptance for command_id=%s", command.command_id)
             self._mark_dead()
             return False
         except CommandInFlightError:
@@ -233,10 +237,15 @@ class ExecutorAdapter:
             self._mark_dead()
             return False
         except Exception:
-            # Any other unexpected exception: genuine internal fault.
+            # Any other unexpected exception is a genuine internal fault.
+            # It is never converted to a result and never replayed, but it
+            # must remain observable to operators.
+            _LOGGER.exception("ExecutorAdapter dispatcher fault for command_id=%s", command.command_id)
             self._mark_dead()
             return False
-
+        controller = self._controller
+        assert controller is not None
+        controller.ack_command_for_worker(command.command_id)
         return self._deliver(self._translate(outcome))
 
     # ---- translation (mechanical only -- no judgment) --------------------
