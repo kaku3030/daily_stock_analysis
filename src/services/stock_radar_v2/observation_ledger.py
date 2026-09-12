@@ -97,6 +97,7 @@ class Observation:
     mae: float | None = None
     universe_snapshot_id: str | None = None
     latency: LatencyTrace = field(default_factory=LatencyTrace)
+    opportunity_id: str | None = None
 
     def __post_init__(self) -> None:
         known = [value for value in (self.decision_available_at, self.confirmed_at) if value is not None]
