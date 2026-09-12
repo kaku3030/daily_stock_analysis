@@ -25,7 +25,7 @@ def test_fixture_summary_is_reconcilable_and_deterministic():
     truths += [_truth("censored", censored=True, status=TruthStatus.UNKNOWN), _truth("unknown", status=TruthStatus.UNKNOWN)]
     summary = calibration_summary(observations, truths, dataset_id="fixture-v1")
     assert summary["eligible_truth_opportunities_count"] == 6
-    assert summary["detector_recall"] == {"numerator": 5, "denominator": 6}
+    assert summary["detector_recall"] == {"numerator": 5, "denominator": 6, "ratio": 5 / 6}
     assert summary["captured_opportunities"] == 1 and summary["missed_opportunities"] == 5
     assert sum(summary["miss_attribution_counts"].values()) == 6
     assert summary["time_to_capture"] == {"count": 1, "p50": 3}
@@ -43,4 +43,4 @@ def test_ambiguous_stable_join_is_unknown_not_symbol_guess():
 def test_empty_summary_is_explicit_unknown():
     result = calibration_summary([], [], dataset_id="empty")
     assert result["status"] == "UNKNOWN"
-    assert result["detector_recall"] == {"numerator": None, "denominator": None}
+    assert result["detector_recall"] == {"numerator": None, "denominator": None, "ratio": None}
