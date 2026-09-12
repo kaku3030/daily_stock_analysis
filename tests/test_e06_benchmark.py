@@ -51,6 +51,18 @@ def test_fresh_sample_can_be_eligible_only_after_correctness():
         validate_row(row)
 
 
+def test_current_chat_cannot_be_promoted_by_toggling_fields():
+    row = make_row(task_id="T1", run_id="x", context="current-chat")
+    row["contamination"] = False
+    row["official_status"] = "ELIGIBLE"
+    row["correctness_gate"] = {
+        "result": "PASS",
+        "protected_governance": {name: "PASS" for name in PROTECTED_CONTRACTS},
+    }
+    with pytest.raises(ValueError, match="validated fresh context"):
+        validate_row(row)
+
+
 def test_unknown_metric_is_rejected():
     with pytest.raises(ValueError, match="unknown metrics"):
         make_row(task_id="T1", run_id="x", context="fresh", typo_metric=1)

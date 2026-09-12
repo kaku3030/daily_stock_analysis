@@ -133,11 +133,12 @@ protected contracts (`production_owner_correct`, `unknown_preserved`,
 
 Contaminated/current-chat/migration samples are emitted as
 `official_status=CONTAMINATED` and cannot be official baseline candidates. A fresh
-sample starts as `PENDING_FRESH_CONTEXT`; only a fresh sample with all seven explicit
-contract evaluations passing may be marked `ELIGIBLE`. The validator rejects
-inconsistent contamination/status combinations, so toggling a boolean alone cannot
-make a sample eligible. E06-T5 may reuse this recorder for E12 evidence; do not create
-a second E12 harness.
+sample starts as `PENDING_FRESH_CONTEXT`; only a fresh sample with its validated
+fresh-context identity and transition evidence, plus all seven explicit contract
+evaluations passing, may be marked `ELIGIBLE`. The validator rejects inconsistent
+context/identity/transition/contamination/status combinations, so toggling fields on a
+current-chat row cannot make a sample eligible. E06-T5 may reuse this recorder for E12
+evidence; do not create a second E12 harness.
 
 ## 6. Correctness gate
 
