@@ -7,21 +7,12 @@ portfolio trust, and actionability.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Any, Mapping
 
 from data_provider.live_feed_types import freeze_normalized_payload
-
-
-class ProviderExecutionOutcome(str, Enum):
-    SUCCEEDED = "SUCCEEDED"
-    PROVIDER_REJECTED = "PROVIDER_REJECTED"
-    PROVIDER_EXCEPTION = "PROVIDER_EXCEPTION"
-    TIMEOUT = "TIMEOUT"
-    WORKER_EXITED = "WORKER_EXITED"
-    PROTOCOL_ERROR = "PROTOCOL_ERROR"
-    CANCELLED = "CANCELLED"
+from .provider_worker_contracts import ProviderExecutionOutcome
 
 
 class ReadOperation(str, Enum):
@@ -77,10 +68,15 @@ class ProviderReadRequest:
     params: Any
 
     def __post_init__(self) -> None:
-        if not self.runtime_instance_id or not self.provider_id or not self.request_id:
-            raise ValueError("read identity fields must be non-empty")
+        for name, value in (("runtime_instance_id", self.runtime_instance_id), ("provider_id", self.provider_id), ("request_id", self.request_id)):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{name} must be a non-blank string")
         if type(self.operation) is not ReadOperation or not isinstance(self.params, _PARAMS[self.operation]):
             raise TypeError("operation requires its typed parameter object")
+        if self.created_at_utc.tzinfo is None or self.created_at_utc.utcoffset() is None:
+            raise ValueError("created_at_utc must be UTC-aware")
+        if self.created_at_utc.astimezone(timezone.utc) != self.created_at_utc:
+            raise ValueError("created_at_utc must use UTC")
         if self.operation is ReadOperation.QUOTE_SNAPSHOT and (not self.params.symbols or any(not s for s in self.params.symbols)):
             raise ValueError("symbols must be a non-empty tuple")
         if hasattr(self.params, "max_count") and not 0 < self.params.max_count <= 10000:
@@ -103,6 +99,23 @@ class ProviderReadOutcome:
     diagnostic_reason: str | None = None
 
     def __post_init__(self) -> None:
+        if (self.runtime_instance_id, self.provider_id) != (self.request.runtime_instance_id, self.request.provider_id):
+            raise ValueError("outcome envelope must match request identity")
+        if type(self.execution_outcome) is not ProviderExecutionOutcome:
+            raise TypeError("execution_outcome must use the authoritative enum")
+        if self.worker_generation is None:
+            if self.execution_outcome is not ProviderExecutionOutcome.CANCELLED_GENERATION_INVALIDATED or self.dispatched_at_monotonic_ns is not None:
+                raise ValueError("None generation is only valid for undispatched generation invalidation")
+        elif isinstance(self.worker_generation, bool) or not isinstance(self.worker_generation, int) or self.worker_generation < 1:
+            raise ValueError("worker_generation must be a positive integer")
+        if self.dispatched_at_monotonic_ns is not None and (isinstance(self.dispatched_at_monotonic_ns, bool) or self.dispatched_at_monotonic_ns < 0):
+            raise ValueError("dispatch monotonic time must be non-negative")
+        if isinstance(self.terminal_observed_at_monotonic_ns, bool) or self.terminal_observed_at_monotonic_ns < 0:
+            raise ValueError("terminal monotonic time must be non-negative")
+        if self.dispatched_at_monotonic_ns is not None and self.terminal_observed_at_monotonic_ns < self.dispatched_at_monotonic_ns:
+            raise ValueError("terminal time must be >= dispatch time")
+        if self.terminal_at_utc.tzinfo is None or self.terminal_at_utc.utcoffset() is None:
+            raise ValueError("terminal_at_utc must be UTC-aware")
         object.__setattr__(self, "normalized_provider_payload", freeze_normalized_payload(self.normalized_provider_payload))
 
 
@@ -117,4 +130,4 @@ class FakeReadWorker:
         self.calls.append(request)
         code, message = error or (None, None)
         return ProviderReadOutcome(request.runtime_instance_id, request.provider_id, generation,
-            request, outcome, 100, 200, datetime(2026, 1, 1), code, message, payload, diagnostic)
+            request, outcome, generation is not None and 100 or None, 200, datetime(2026, 1, 1, tzinfo=timezone.utc), code, message, payload, diagnostic)
