@@ -35,9 +35,17 @@ from .provider_worker_contracts import (
     ResolvedProviderCommandOutcome,
 )
 from .registry import DesiredRegistryEntry, DesiredRegistrySnapshot, DesiredSubscriptionRegistry
+from .provider_worker_executor_adapter import (
+    AdapterBusyError,
+    AdapterClosedError,
+    ProviderWorkerExecutorAdapter,
+    dispatch_one_command,
+)
 
 __all__ = [
     "CommandQueueFull",
+    "AdapterBusyError",
+    "AdapterClosedError",
     "ControllerGeneration",
     "DesiredRegistryEntry",
     "DesiredRegistrySnapshot",
@@ -65,4 +73,6 @@ __all__ = [
     "new_command_id",
     "new_runtime_instance_id",
     "run_command_worker_once",
+    "ProviderWorkerExecutorAdapter",
+    "dispatch_one_command",
 ]
