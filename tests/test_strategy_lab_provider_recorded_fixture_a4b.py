@@ -15,6 +15,8 @@ from src.services.strategy_lab.provider_recorded_fixture import (
     PROVIDER_RECORDED_FIXTURE_SCHEMA_VERSION,
     CapturedProviderAuthorityReceipt,
     VerifiedCapturedProviderAuthority,
+    authority_receipt_bytes_sha256,
+    build_pre_seal_a_share_provider_authority_receipt,
     capture_current_a_share_provider_authority,
     convert_sealed_capture_to_provider_fixture,
     diagnose_current_provider_authority,
@@ -23,6 +25,7 @@ from src.services.strategy_lab.provider_recorded_fixture import (
 from src.services.strategy_lab.raw_capture import (
     NORMALIZATION_LINEAGE_VERSION,
     RAW_CAPTURE_MANIFEST_VERSION,
+    RAW_CAPTURE_MANIFEST_VERSION_V2,
     encode_raw_capture,
     load_sealed_raw_capture,
 )
@@ -117,9 +120,47 @@ def capture_authority(sealed):
     return load_captured_provider_authority_receipt(receipt.to_json_bytes())
 
 
+def pre_seal_receipt(payload, artifact_bytes, *, observation_id="history-cn-15m-1"):
+    return build_pre_seal_a_share_provider_authority_receipt(
+        artifact_bytes,
+        observation_id=observation_id,
+        source_token="akshare_em",
+        endpoint_id="akshare.eastmoney_intraday",
+        market="cn",
+    )
+
+
+def write_sealed_v2(tmp_path, payload=None, *, observation_id="history-cn-15m-1"):
+    """Seal a v0.2 manifest whose anchor binds a receipt minted before sealing.
+
+    Unlike ``write_sealed`` (legacy v0.1, no anchor), the receipt here is
+    built directly from raw artifact bytes -- before any manifest exists --
+    so the manifest's ``authority_receipt_sha256`` can only ever describe a
+    receipt that already existed at sealing time.
+    """
+
+    payload = payload or artifact_payload()
+    artifact_bytes = encode_raw_capture(payload)
+    receipt = pre_seal_receipt(payload, artifact_bytes, observation_id=observation_id)
+    artifact_path = tmp_path / "capture.json"
+    artifact_path.write_bytes(artifact_bytes)
+    manifest = {
+        "schema_version": RAW_CAPTURE_MANIFEST_VERSION_V2,
+        "capture_id": payload["capture_id"],
+        "artifact_filename": artifact_path.name,
+        "artifact_sha256": sha256(artifact_bytes).hexdigest(),
+        "sealed_at_utc": "2026-09-10T10:00:05Z",
+        "authority_receipt_sha256": authority_receipt_bytes_sha256(receipt),
+    }
+    manifest_path = tmp_path / "capture.manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    sealed = load_sealed_raw_capture(artifact_path, manifest_path)
+    authority = load_captured_provider_authority_receipt(receipt.to_json_bytes())
+    return sealed, authority
+
+
 def make_fixture(tmp_path):
-    sealed = write_sealed(tmp_path)
-    authority = capture_authority(sealed)
+    sealed, authority = write_sealed_v2(tmp_path)
     fixture = convert_sealed_capture_to_provider_fixture(
         sealed,
         observation_id="history-cn-15m-1",
@@ -266,8 +307,7 @@ def test_authority_bound_to_different_raw_artifact_fails_closed(tmp_path_factory
 def test_naive_row_datetime_is_never_localized_by_guesswork(tmp_path):
     payload = artifact_payload()
     payload["observations"][0]["raw_payload"]["raw_rows"][0]["datetime"] = "2026-09-09T09:45:00"
-    sealed = write_sealed(tmp_path, payload)
-    authority = capture_authority(sealed)
+    sealed, authority = write_sealed_v2(tmp_path, payload)
     with pytest.raises(ValueError, match="must be timezone-aware"):
         convert_sealed_capture_to_provider_fixture(
             sealed,
@@ -280,8 +320,7 @@ def test_naive_row_datetime_is_never_localized_by_guesswork(tmp_path):
 def test_numeric_float_is_not_silently_coerced_to_decimal_text(tmp_path):
     payload = artifact_payload()
     payload["observations"][0]["raw_payload"]["raw_rows"][0]["open"] = 10.0
-    sealed = write_sealed(tmp_path, payload)
-    authority = capture_authority(sealed)
+    sealed, authority = write_sealed_v2(tmp_path, payload)
     with pytest.raises(ValueError, match="non-empty trimmed string"):
         convert_sealed_capture_to_provider_fixture(
             sealed,
@@ -292,8 +331,7 @@ def test_numeric_float_is_not_silently_coerced_to_decimal_text(tmp_path):
 
 
 def test_empty_raw_rows_cannot_become_provider_recorded_fixture(tmp_path):
-    sealed = write_sealed(tmp_path, artifact_payload(rows=[]))
-    authority = capture_authority(sealed)
+    sealed, authority = write_sealed_v2(tmp_path, artifact_payload(rows=[]))
     with pytest.raises(ValueError, match="non-empty raw_rows"):
         convert_sealed_capture_to_provider_fixture(
             sealed,
@@ -336,8 +374,7 @@ def test_serialization_diagnostic_blocks_conversion(tmp_path_factory):
 def test_event_time_after_verified_available_at_fails_closed(tmp_path):
     payload = artifact_payload()
     payload["observations"][0]["raw_payload"]["raw_rows"][1]["datetime"] = "2026-09-10T10:00:01.500000Z"
-    sealed = write_sealed(tmp_path, payload)
-    authority = capture_authority(sealed)
+    sealed, authority = write_sealed_v2(tmp_path, payload)
     with pytest.raises(ValueError, match="after verified available_at"):
         convert_sealed_capture_to_provider_fixture(
             sealed,
@@ -379,8 +416,7 @@ def test_reordered_lineage_fails_closed(tmp_path):
 
 
 def test_identical_conversion_is_100_of_100_deterministic(tmp_path):
-    sealed = write_sealed(tmp_path)
-    authority = capture_authority(sealed)
+    sealed, authority = write_sealed_v2(tmp_path)
     digests = {
         convert_sealed_capture_to_provider_fixture(
             sealed,
@@ -559,8 +595,9 @@ def test_rehashed_receipt_binding_mutations_rejected_at_conversion(tmp_path, fie
 
 
 def test_legitimate_receipt_round_trip_is_byte_deterministic_and_resolver_stable(tmp_path):
-    sealed = write_sealed(tmp_path)
-    receipt = capture_receipt(sealed)
+    payload = artifact_payload()
+    artifact_bytes = encode_raw_capture(payload)
+    receipt = pre_seal_receipt(payload, artifact_bytes)
     raw = receipt.to_json_bytes()
     first = load_captured_provider_authority_receipt(raw)
     second = load_captured_provider_authority_receipt(first.persisted_receipt_bytes())
@@ -570,6 +607,21 @@ def test_legitimate_receipt_round_trip_is_byte_deterministic_and_resolver_stable
     resolved = resolver("akshare_em", "akshare.eastmoney_intraday", "cn")
     assert resolved is not None
     assert resolved.authority_ref == f"captured-provider-authority:sha256:{second.digest}"
+
+    artifact_path = tmp_path / "capture.json"
+    artifact_path.write_bytes(artifact_bytes)
+    manifest = {
+        "schema_version": RAW_CAPTURE_MANIFEST_VERSION_V2,
+        "capture_id": payload["capture_id"],
+        "artifact_filename": artifact_path.name,
+        "artifact_sha256": sha256(artifact_bytes).hexdigest(),
+        "sealed_at_utc": "2026-09-10T10:00:05Z",
+        "authority_receipt_sha256": authority_receipt_bytes_sha256(receipt),
+    }
+    manifest_path = tmp_path / "capture.manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    sealed = load_sealed_raw_capture(artifact_path, manifest_path)
+
     fixture = convert_sealed_capture_to_provider_fixture(
         sealed,
         observation_id="history-cn-15m-1",
@@ -579,3 +631,169 @@ def test_legitimate_receipt_round_trip_is_byte_deterministic_and_resolver_stable
     first_ids = tuple(event.event_id for event in fixture.materialize_events())
     second_ids = tuple(event.event_id for event in fixture.materialize_events())
     assert first_ids == second_ids
+
+
+# --- H-A4B-02: contemporaneous receipt origin -------------------------------
+#
+# A receipt being internally valid is not enough: A4b conversion must also
+# prove the receipt was bound into the raw capture's manifest at the
+# original sealing event, not minted against it afterward.
+
+
+def test_h_a4b_02_a_legacy_retrospective_mint_is_rejected(tmp_path):
+    """A. A v0.1 capture with no anchor stays ineligible even with a fresh, valid receipt."""
+
+    sealed = write_sealed(tmp_path)
+    authority = capture_authority(sealed)
+    with pytest.raises(ValueError, match="no contemporaneous authority receipt anchor"):
+        convert_sealed_capture_to_provider_fixture(
+            sealed,
+            observation_id="history-cn-15m-1",
+            authority=authority,
+            fixture_id="legacy-retrospective-mint",
+        )
+
+
+def test_h_a4b_02_b_manifest_anchor_digest_mismatch_is_rejected(tmp_path):
+    """B. A v0.2 manifest anchor that does not hash-match the persisted receipt bytes fails closed."""
+
+    payload = artifact_payload()
+    artifact_bytes = encode_raw_capture(payload)
+    receipt = pre_seal_receipt(payload, artifact_bytes)
+    artifact_path = tmp_path / "capture.json"
+    artifact_path.write_bytes(artifact_bytes)
+    manifest = {
+        "schema_version": RAW_CAPTURE_MANIFEST_VERSION_V2,
+        "capture_id": payload["capture_id"],
+        "artifact_filename": artifact_path.name,
+        "artifact_sha256": sha256(artifact_bytes).hexdigest(),
+        "sealed_at_utc": "2026-09-10T10:00:05Z",
+        "authority_receipt_sha256": "0" * 64,
+    }
+    manifest_path = tmp_path / "capture.manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    sealed = load_sealed_raw_capture(artifact_path, manifest_path)
+    authority = load_captured_provider_authority_receipt(receipt.to_json_bytes())
+    with pytest.raises(ValueError, match="anchor mismatch"):
+        convert_sealed_capture_to_provider_fixture(
+            sealed,
+            observation_id="history-cn-15m-1",
+            authority=authority,
+            fixture_id="anchor-digest-mismatch",
+        )
+
+
+def test_h_a4b_02_c_cross_artifact_receipt_reuse_is_rejected(tmp_path_factory):
+    """C. A validly capture-time-anchored receipt from artifact A cannot authorize artifact B."""
+
+    sealed_a, authority_a = write_sealed_v2(tmp_path_factory.mktemp("artifact-a"))
+    payload_b = artifact_payload()
+    payload_b["capture_id"] = "capture-akshare-em-aware-crossb"
+    sealed_b, _ = write_sealed_v2(tmp_path_factory.mktemp("artifact-b"), payload_b)
+    with pytest.raises(ValueError, match="different raw artifact"):
+        convert_sealed_capture_to_provider_fixture(
+            sealed_b,
+            observation_id="history-cn-15m-1",
+            authority=authority_a,
+            fixture_id="cross-artifact-reuse",
+        )
+
+
+def test_h_a4b_02_d_anchor_tamper_after_seal_is_rejected(tmp_path):
+    """D. Mutating the sealed manifest's immutable anchor is detected and rejected."""
+
+    sealed, authority = write_sealed_v2(tmp_path)
+    tampered_manifest = replace(sealed.manifest, authority_receipt_sha256="1" * 64)
+    object.__setattr__(sealed, "_manifest", tampered_manifest)
+    with pytest.raises(ValueError, match="anchor mismatch"):
+        convert_sealed_capture_to_provider_fixture(
+            sealed,
+            observation_id="history-cn-15m-1",
+            authority=authority,
+            fixture_id="anchor-tamper",
+        )
+
+
+def test_h_a4b_02_e_valid_v02_capture_time_anchored_receipt_is_accepted(tmp_path):
+    """E. The legitimate capture-time-anchored path seals, loads, reloads, and converts cleanly."""
+
+    sealed, authority = write_sealed_v2(tmp_path)
+    assert sealed.manifest.schema_version == RAW_CAPTURE_MANIFEST_VERSION_V2
+    assert sealed.manifest.is_authority_receipt_anchored
+    reloaded_authority = load_captured_provider_authority_receipt(authority.persisted_receipt_bytes())
+    fixture = convert_sealed_capture_to_provider_fixture(
+        sealed,
+        observation_id="history-cn-15m-1",
+        authority=reloaded_authority,
+        fixture_id="v02-positive-path",
+    )
+    first_ids = tuple(event.event_id for event in fixture.materialize_events())
+    second_ids = tuple(event.event_id for event in fixture.materialize_events())
+    assert first_ids == second_ids
+    assert len(fixture.rows) == 2
+
+
+def test_h_a4b_02_f_legacy_v01_capture_still_loads_for_ordinary_a4_use(tmp_path):
+    """F. Legacy v0.1 loading/PIT semantics are unaffected by the stricter A4b gate."""
+
+    sealed = write_sealed(tmp_path)
+    assert sealed.manifest.schema_version == RAW_CAPTURE_MANIFEST_VERSION
+    assert not sealed.manifest.is_authority_receipt_anchored
+    available_at, observed_at = sealed.pit_binding("history-cn-15m-1")
+    assert available_at is not None
+    assert observed_at is not None
+    assert sealed.artifact.capture_id == "capture-akshare-em-aware-001"
+
+
+def test_h_a4b_02_g_private_mint_helper_cannot_bypass_a_missing_anchor(tmp_path):
+    """G. Even the private mint helper cannot conjure an anchor a v0.1 manifest never sealed."""
+
+    sealed = write_sealed(tmp_path)
+    receipt = binding._mint_captured_provider_authority_receipt(
+        raw_artifact_sha256=sealed.manifest.artifact_sha256,
+        capture_id=sealed.artifact.capture_id,
+        observation_id="history-cn-15m-1",
+        captured_at=sealed.pit_binding("history-cn-15m-1")[1],
+        source_token="akshare_em",
+        endpoint_id="akshare.eastmoney_intraday",
+        market="cn",
+    )
+    authority = load_captured_provider_authority_receipt(receipt.to_json_bytes())
+    with pytest.raises(ValueError, match="no contemporaneous authority receipt anchor"):
+        convert_sealed_capture_to_provider_fixture(
+            sealed,
+            observation_id="history-cn-15m-1",
+            authority=authority,
+            fixture_id="private-helper-bypass",
+        )
+
+
+def test_h_a4b_02_h_registry_drift_does_not_rewrite_accepted_v02_evidence(monkeypatch, tmp_path):
+    """H. Current A0/A1 registry drift stays diagnostic-only for v0.2-anchored evidence too."""
+
+    sealed, authority = write_sealed_v2(tmp_path)
+    fixture = convert_sealed_capture_to_provider_fixture(
+        sealed,
+        observation_id="history-cn-15m-1",
+        authority=authority,
+        fixture_id="v02-registry-drift",
+    )
+    original_digest = fixture.fixture_digest
+    drifted = RealtimeSourceLineage(
+        source_token="akshare_em",
+        adapter_id="future-adapter",
+        upstream_lineage_id="future-upstream",
+        endpoint_id="future.endpoint",
+        markets=("cn",),
+    )
+    monkeypatch.setattr(binding, "CN_REALTIME_SOURCE_LINEAGE", {"akshare_em": drifted})
+    diagnostic = diagnose_current_provider_authority(authority)
+    assert diagnostic.status == "CURRENT_AUTHORITY_DRIFT"
+    assert fixture.fixture_digest == original_digest
+    refixture = convert_sealed_capture_to_provider_fixture(
+        sealed,
+        observation_id="history-cn-15m-1",
+        authority=authority,
+        fixture_id="v02-registry-drift",
+    )
+    assert refixture.fixture_digest == original_digest

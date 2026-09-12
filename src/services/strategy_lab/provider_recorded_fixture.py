@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from hashlib import sha256
 import json
 from typing import Any, Mapping
 
@@ -21,6 +22,8 @@ from .raw_capture import (
     NormalizationLineage,
     SealedRawCapture,
     build_row_normalization_lineage,
+    parse_and_digest_raw_capture_artifact,
+    pit_binding_for_observation,
 )
 from .recorded_fixture import _ROW_KEYS, _decimal_text, _parse_aware, _require_exact_keys
 from .strict_json import loads_strict_json
@@ -354,21 +357,16 @@ def load_captured_provider_authority_receipt(raw: bytes | str) -> VerifiedCaptur
     return VerifiedCapturedProviderAuthority._from_persisted_receipt(raw)
 
 
-def capture_current_a_share_provider_authority(
-    sealed: SealedRawCapture,
+def _mint_captured_provider_authority_receipt(
     *,
+    raw_artifact_sha256: str,
+    capture_id: str,
     observation_id: str,
+    captured_at: datetime,
     source_token: str,
     endpoint_id: str,
-    market: str = "cn",
+    market: str,
 ) -> CapturedProviderAuthorityReceipt:
-    """Mint capture-time receipt evidence; callers must persist bytes before later use."""
-
-    if not isinstance(sealed, SealedRawCapture):
-        raise ValueError("captured authority requires a verified SealedRawCapture")
-    _assert_capture_authority_sources_still_match_accepted_versions()
-    artifact = sealed.artifact
-    _, observed_at = sealed.pit_binding(observation_id)
     lineage = CN_REALTIME_SOURCE_LINEAGE.get(source_token)
     if lineage is None or market not in lineage.markets:
         raise ValueError("source token is not admitted by accepted A0 authority")
@@ -383,9 +381,9 @@ def capture_current_a_share_provider_authority(
         "market": market,
         "adapter_id": lineage.adapter_id,
         "upstream_lineage_id": lineage.upstream_lineage_id,
-        "captured_at": CapturedProviderAuthorityReceipt._time_text(observed_at),
-        "raw_artifact_sha256": sealed.manifest.artifact_sha256,
-        "capture_id": artifact.capture_id,
+        "captured_at": CapturedProviderAuthorityReceipt._time_text(captured_at),
+        "raw_artifact_sha256": raw_artifact_sha256,
+        "capture_id": capture_id,
         "observation_id": observation_id,
         "a0_authority_source_ref": A0_AUTHORITY_SOURCE_REF,
         "a1_authority_source_ref": A1_AUTHORITY_SOURCE_REF,
@@ -395,6 +393,76 @@ def capture_current_a_share_provider_authority(
     return CapturedProviderAuthorityReceipt.from_mapping(
         payload | {"digest": stable_hash(payload)}
     )
+
+
+def capture_current_a_share_provider_authority(
+    sealed: SealedRawCapture,
+    *,
+    observation_id: str,
+    source_token: str,
+    endpoint_id: str,
+    market: str = "cn",
+) -> CapturedProviderAuthorityReceipt:
+    """Mint capture-time receipt evidence; callers must persist bytes before later use.
+
+    This can only ever be called against an already-sealed manifest, so its
+    output alone never proves contemporaneous origin: A4b conversion also
+    requires the manifest's own sealed anchor (see
+    ``build_pre_seal_a_share_provider_authority_receipt`` for the path that
+    lets a receipt be bound into the manifest at sealing time instead).
+    """
+
+    if not isinstance(sealed, SealedRawCapture):
+        raise ValueError("captured authority requires a verified SealedRawCapture")
+    _assert_capture_authority_sources_still_match_accepted_versions()
+    artifact = sealed.artifact
+    _, observed_at = sealed.pit_binding(observation_id)
+    return _mint_captured_provider_authority_receipt(
+        raw_artifact_sha256=sealed.manifest.artifact_sha256,
+        capture_id=artifact.capture_id,
+        observation_id=observation_id,
+        captured_at=observed_at,
+        source_token=source_token,
+        endpoint_id=endpoint_id,
+        market=market,
+    )
+
+
+def build_pre_seal_a_share_provider_authority_receipt(
+    artifact_bytes: bytes,
+    *,
+    observation_id: str,
+    source_token: str,
+    endpoint_id: str,
+    market: str = "cn",
+) -> CapturedProviderAuthorityReceipt:
+    """Mint receipt evidence directly from raw bytes, before any manifest exists.
+
+    A caller sealing a v0.2 manifest uses this to obtain canonical receipt
+    bytes first, hashes them, and writes that hash as the manifest's
+    ``authority_receipt_sha256`` anchor in the same sealing operation -- so
+    the anchor can only ever describe a receipt that already existed when
+    the manifest was sealed.
+    """
+
+    _assert_capture_authority_sources_still_match_accepted_versions()
+    artifact, raw_artifact_sha256 = parse_and_digest_raw_capture_artifact(artifact_bytes)
+    _, observed_at = pit_binding_for_observation(artifact, observation_id)
+    return _mint_captured_provider_authority_receipt(
+        raw_artifact_sha256=raw_artifact_sha256,
+        capture_id=artifact.capture_id,
+        observation_id=observation_id,
+        captured_at=observed_at,
+        source_token=source_token,
+        endpoint_id=endpoint_id,
+        market=market,
+    )
+
+
+def authority_receipt_bytes_sha256(receipt: CapturedProviderAuthorityReceipt) -> str:
+    """Canonical digest used as the v0.2 manifest's immutable anchor value."""
+
+    return sha256(receipt.to_json_bytes()).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -674,6 +742,7 @@ def convert_sealed_capture_to_provider_fixture(
         raise ValueError("captured authority is bound to a different capture/observation")
     if authority_payload.captured_at != observed_at:
         raise ValueError("captured authority time does not match verified A4 observation")
+    sealed.verify_authority_receipt_anchor(authority.persisted_receipt_bytes())
     payload = observation.raw_payload
     if not isinstance(payload, Mapping):
         raise ValueError("verified observation raw payload must be an object")

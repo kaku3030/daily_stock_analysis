@@ -6,11 +6,14 @@ import pytest
 
 from src.services.strategy_lab.raw_capture import (
     RAW_CAPTURE_MANIFEST_VERSION,
+    RAW_CAPTURE_MANIFEST_VERSION_V2,
     RawCaptureArtifact,
+    RawCaptureManifest,
     RawCaptureObservation,
     build_row_normalization_lineage,
     encode_raw_capture,
     load_sealed_raw_capture,
+    parse_and_digest_raw_capture_artifact,
 )
 
 UTC = timezone.utc
@@ -287,3 +290,98 @@ def test_unknown_observation_cannot_be_normalized(tmp_path):
             normalizer_sha256=NORMALIZER_SHA,
             derived_event_id="event:1",
         )
+
+
+def test_legacy_manifest_is_not_authority_receipt_anchored(tmp_path):
+    artifact_path, manifest_path = write_sealed(tmp_path)
+    sealed = load_sealed_raw_capture(artifact_path, manifest_path)
+    assert sealed.manifest.schema_version == RAW_CAPTURE_MANIFEST_VERSION
+    assert not sealed.manifest.is_authority_receipt_anchored
+    assert sealed.manifest.authority_receipt_sha256 is None
+
+
+def test_legacy_manifest_cannot_carry_an_authority_receipt_anchor():
+    with pytest.raises(ValueError, match="cannot carry an authority receipt anchor"):
+        RawCaptureManifest(
+            schema_version=RAW_CAPTURE_MANIFEST_VERSION,
+            capture_id="capture-x",
+            artifact_filename="capture.json",
+            artifact_sha256="a" * 64,
+            sealed_at=datetime(2026, 9, 10, 10, 0, 5, tzinfo=UTC),
+            authority_receipt_sha256="b" * 64,
+        )
+
+
+def test_v02_manifest_requires_valid_hex_authority_receipt_anchor():
+    with pytest.raises(ValueError, match="authority_receipt_sha256"):
+        RawCaptureManifest(
+            schema_version=RAW_CAPTURE_MANIFEST_VERSION_V2,
+            capture_id="capture-x",
+            artifact_filename="capture.json",
+            artifact_sha256="a" * 64,
+            sealed_at=datetime(2026, 9, 10, 10, 0, 5, tzinfo=UTC),
+            authority_receipt_sha256=None,
+        )
+
+
+def test_v02_manifest_round_trips_with_authority_receipt_anchor(tmp_path):
+    payload = artifact_payload()
+    artifact_bytes = encode_raw_capture(payload)
+    artifact_path = tmp_path / "capture.json"
+    artifact_path.write_bytes(artifact_bytes)
+    anchor = "c" * 64
+    manifest = {
+        "schema_version": RAW_CAPTURE_MANIFEST_VERSION_V2,
+        "capture_id": payload["capture_id"],
+        "artifact_filename": artifact_path.name,
+        "artifact_sha256": sha256(artifact_bytes).hexdigest(),
+        "sealed_at_utc": "2026-09-10T10:00:05Z",
+        "authority_receipt_sha256": anchor,
+    }
+    manifest_path = tmp_path / "capture.manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    sealed = load_sealed_raw_capture(artifact_path, manifest_path)
+    assert sealed.manifest.is_authority_receipt_anchored
+    assert sealed.manifest.authority_receipt_sha256 == anchor
+
+
+def test_verify_authority_receipt_anchor_fails_closed_for_legacy_manifest(tmp_path):
+    artifact_path, manifest_path = write_sealed(tmp_path)
+    sealed = load_sealed_raw_capture(artifact_path, manifest_path)
+    with pytest.raises(ValueError, match="no contemporaneous authority receipt anchor"):
+        sealed.verify_authority_receipt_anchor(b'{"anything":"goes"}')
+
+
+def test_verify_authority_receipt_anchor_detects_mismatch(tmp_path):
+    payload = artifact_payload()
+    artifact_bytes = encode_raw_capture(payload)
+    artifact_path = tmp_path / "capture.json"
+    artifact_path.write_bytes(artifact_bytes)
+    receipt_bytes = b'{"fixture":"receipt"}'
+    manifest = {
+        "schema_version": RAW_CAPTURE_MANIFEST_VERSION_V2,
+        "capture_id": payload["capture_id"],
+        "artifact_filename": artifact_path.name,
+        "artifact_sha256": sha256(artifact_bytes).hexdigest(),
+        "sealed_at_utc": "2026-09-10T10:00:05Z",
+        "authority_receipt_sha256": sha256(receipt_bytes).hexdigest(),
+    }
+    manifest_path = tmp_path / "capture.manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    sealed = load_sealed_raw_capture(artifact_path, manifest_path)
+    sealed.verify_authority_receipt_anchor(receipt_bytes)
+    with pytest.raises(ValueError, match="anchor mismatch"):
+        sealed.verify_authority_receipt_anchor(receipt_bytes + b"\n")
+
+
+def test_pre_seal_helper_parses_artifact_and_digest_without_a_manifest():
+    payload = artifact_payload()
+    artifact_bytes = encode_raw_capture(payload)
+    artifact, digest = parse_and_digest_raw_capture_artifact(artifact_bytes)
+    assert digest == sha256(artifact_bytes).hexdigest()
+    assert artifact.capture_id == payload["capture_id"]
+
+
+def test_pre_seal_helper_rejects_empty_bytes():
+    with pytest.raises(ValueError, match="artifact bytes are required"):
+        parse_and_digest_raw_capture_artifact(b"")
