@@ -133,14 +133,13 @@ protected contracts (`production_owner_correct`, `unknown_preserved`,
 
 Contaminated/current-chat/migration samples are emitted as
 `official_status=CONTAMINATED` and cannot be official baseline candidates. A fresh
-sample starts as `PENDING_FRESH_CONTEXT`; `ELIGIBLE` additionally requires an
-out-of-band fresh-context attestation bound to the exact `schema_version`, `task_id`,
-and `run_id`. The row's context, identity, and transition fields are not an attestation
-and cannot self-certify freshness. All seven explicit contract evaluations must pass;
-missing, unknown, mismatched, or replayed attestations fail closed. The validator
-rejects inconsistent context/identity/transition/contamination/status combinations, so
-toggling fields on a current-chat row cannot make a sample eligible. E06-T5 may reuse this recorder for E12
-evidence; do not create a second E12 harness.
+sample starts as `PENDING_FRESH_CONTEXT`; local validation never emits or accepts
+`ELIGIBLE`. Official eligibility and promotion are an external step outside this
+harness, so mutating a current-chat row or supplying a fresh-looking row cannot
+grant local authority. All seven explicit contract evaluations must pass for a
+claimed correctness PASS, while local validation still keeps the sample pending
+fresh context. E06-T5 may reuse this recorder for E12 evidence; do not create a
+second E12 harness.
 
 ## 6. Correctness gate
 

@@ -24,9 +24,7 @@ PROTECTED_CONTRACTS = (
     "notification_single_attempt_or_fallback_legality_preserved",
     "required_tests_or_replay_named",
 )
-OFFICIAL_STATUSES = ("CONTAMINATED", "PENDING_FRESH_CONTEXT", "ELIGIBLE")
-FRESH_CONTEXT_IDENTITY = "fresh-context-v0.1"
-FRESH_CONTEXT_TRANSITION = {"validated": True, "source": "fresh-context"}
+OFFICIAL_STATUSES = ("CONTAMINATED", "PENDING_FRESH_CONTEXT")
 
 
 def count_tokens(text: str, encoding: str = "cl100k_base") -> int:
@@ -63,17 +61,14 @@ def make_row(*, task_id: str, run_id: str, context: str, contamination: bool = T
     }
 
 
-def make_fresh_context_attestation(*, task_id: str, run_id: str) -> dict[str, Any]:
-    return {"schema_version": SCHEMA_VERSION, "task_id": task_id, "run_id": run_id,
-            "identity": FRESH_CONTEXT_IDENTITY, "transition": dict(FRESH_CONTEXT_TRANSITION)}
-
-
-def validate_row(row: dict[str, Any], *, fresh_context_attestation: dict[str, Any] | None = None) -> None:
+def validate_row(row: dict[str, Any]) -> None:
     if row.get("schema_version") != SCHEMA_VERSION:
         raise ValueError("unsupported schema_version")
     if set(row.get("layers", {})) != set(LAYERS):
         raise ValueError("layers A/B/C are required and must remain separate")
     status = row.get("official_status")
+    if status == "ELIGIBLE":
+        raise ValueError("official eligibility is external-only")
     if status not in OFFICIAL_STATUSES:
         raise ValueError("invalid official_status")
     if row.get("contamination") is True and status != "CONTAMINATED":
@@ -90,17 +85,6 @@ def validate_row(row: dict[str, Any], *, fresh_context_attestation: dict[str, An
         or any(evaluations[name] != "PASS" for name in PROTECTED_CONTRACTS)
     ):
         raise ValueError("correctness PASS requires all seven protected contracts to PASS")
-    attestation_valid = (fresh_context_attestation is not None
-        and fresh_context_attestation.get("schema_version") == SCHEMA_VERSION
-        and fresh_context_attestation.get("task_id") == row.get("task_id")
-        and fresh_context_attestation.get("run_id") == row.get("run_id")
-        and fresh_context_attestation.get("identity") == FRESH_CONTEXT_IDENTITY
-        and fresh_context_attestation.get("transition") == FRESH_CONTEXT_TRANSITION)
-    if status == "ELIGIBLE" and (row.get("context") != "fresh" or row.get("contamination")
-        or result != "PASS" or not attestation_valid):
-        raise ValueError("official eligibility requires validated fresh context and correctness PASS")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
