@@ -36,7 +36,7 @@ preserved governed semantics
 | E08 | config facts | bounded drift matrix + Shadow test; five aligned defaults measured across runtime/registry/example; STOCK_LIST and empty fallback semantics protected | SHADOW / imported-constant deletion remains unproven |
 | E09 | pipeline/read-set | HK symbol representative task measured at 7 file reads | SHADOW evidence |
 | E10 | failure taxonomy | expanded differential found real divergences | SHADOW MORE; universal framework REJECT |
-| E11 | cache semantics | positive TTL boundary passes; real write/clear/thread/logging/read-set comparison remains incomplete | SHADOW boundary only; abstraction UNKNOWN, broad unification REJECT |
+| E11 | cache semantics | lifecycle Shadow differential passes; provider-local failure, lock, logging, key/scope and restart semantics remain materially different | KEEP PROVIDER LOCAL CACHE SEMANTICS / SHADOW EVIDENCE ONLY |
 | E12 | symbol semantics | fixture corpus + baseline-vs-shadow routing differential + 9→3 call-site delta | BLOCKED; unauthorized implementation reverted; future candidate only |
 
 ## Strongest current DELETE candidates
@@ -46,7 +46,7 @@ Not production-approved:
 1. **E12 suffix wrappers:** full Shadow differential preserves market-tag and daily/realtime route decisions across CN/HK/US, JP/KR/TW, unknown and adversarial suffix inputs. The measured 9 wrapper-call expressions reduce to 3 Shadow lookups (-6), with `net_complexity_result = SMALLER`; production deletion remains frozen pending owner authorization.
 2. **E03 YFinance:** retry machinery is behaviorally inactive on the ordinary wrapped transport path, but undecorated behavior exposes native exceptions while the decorated path exposes `DataFetchError` (with preserved cause). `net_complexity_result = UNKNOWN`; compatibility-visible semantics require SHADOW MORE.
 3. **E08 config literals:** five aligned backend/numeric defaults are measured across runtime constants, registry metadata, and `.env.example`; no production owner was deleted. `net_complexity_result = UNKNOWN`.
-4. **E11 positive snapshot cache mechanics:** TTL predicate boundary is Shadow-pass only; miss/empty and negative-age behavior also match the model, but lifecycle/read-set evidence is absent. `net_complexity_result = UNKNOWN`.
+4. **E11 cache lifecycle:** Shadow evidence covers miss/write/hit/strict boundary/stale/clear/exception/concurrency and observability counterexamples. No production branch or read-set deletion was measured; `semantic_owner_delta = 0`, `net_complexity_result = UNKNOWN`, terminal decision is `KEEP_PROVIDER_LOCAL_CACHE_SEMANTICS / SHADOW_EVIDENCE_ONLY`.
 
 ## Candidate downgraded after evidence
 
