@@ -92,3 +92,8 @@ net_complexity_result = SMALLER
 ```
 
 E08-A conclusion: start with **tests + imported constants**, not a framework.
+
+Current result: `net_complexity_result = UNKNOWN`. The Shadow test reduces drift
+risk and quantifies five aligned facts, but it does not itself remove a runtime
+owner or reduce the production read-set. An imported-constant change remains a
+candidate only after compatibility and rollback evidence.

@@ -29,14 +29,14 @@ preserved governed semantics
 | ID | Surface | Current status | Current decision |
 | --- | --- | --- | --- |
 | E01 | Currentness | delegated / differential replay spec | SHADOW |
-| E03 | retry/fallback | YFinance ordinary wrapped path is single-call; exception matrix still incomplete | SHADOW MORE / no retry restoration |
+| E03 | retry/fallback | YFinance ordinary wrapped path is single-call; transport/data/parser matrix now records call count and causal surface | SHADOW MORE / no retry restoration |
 | E05 | provider capability boundary | Golden Contract identified | SHADOW |
 | E06 | Agent read-set/token | benchmark spec | SHADOW |
 | E07 | Headroom/tool output | protected-field benchmark spec | SHADOW only |
-| E08 | config facts | bounded drift matrix + Shadow test; STOCK_LIST and empty fallback semantics protected | SHADOW / tests or imported constants only |
+| E08 | config facts | bounded drift matrix + Shadow test; five aligned defaults measured across runtime/registry/example; STOCK_LIST and empty fallback semantics protected | SHADOW / imported-constant deletion remains unproven |
 | E09 | pipeline/read-set | HK symbol representative task measured at 7 file reads | SHADOW evidence |
 | E10 | failure taxonomy | expanded differential found real divergences | SHADOW MORE; universal framework REJECT |
-| E11 | cache semantics | positive TTL boundary passes; lifecycle/read-set comparison incomplete | SHADOW boundary only; abstraction UNKNOWN, broad unification REJECT |
+| E11 | cache semantics | positive TTL boundary passes; real write/clear/thread/logging/read-set comparison remains incomplete | SHADOW boundary only; abstraction UNKNOWN, broad unification REJECT |
 | E12 | symbol semantics | fixture corpus + full routing differential + 9→3 call-site delta | PROMOTION CANDIDATE; production owner review still required |
 
 ## Strongest current DELETE candidates
@@ -44,9 +44,9 @@ preserved governed semantics
 Not production-approved:
 
 1. **E12 suffix wrappers:** full Shadow differential preserves market-tag and daily/realtime route decisions across CN/HK/US, JP/KR/TW, unknown and adversarial suffix inputs. The measured 9 wrapper-call expressions reduce to 3 Shadow lookups (-6), with `net_complexity_result = SMALLER`; production deletion remains frozen pending owner authorization.
-2. **E03 YFinance:** retry machinery is behaviorally inactive on the ordinary wrapped transport path; keep production unchanged until the remaining exception/fallback matrix decides whether dead machinery can be deleted.
-3. **E08 config literals:** only aligned numeric/backend defaults are candidates; use tests/imported constants, exclude `STOCK_LIST`, and preserve missing-versus-empty fallback semantics. `net_complexity_result = UNKNOWN`.
-4. **E11 positive snapshot cache mechanics:** TTL predicate boundary is Shadow-pass only. A generic abstraction is rejected; a local primitive remains `net_complexity_result = UNKNOWN` until lifecycle/read-set evidence proves it smaller.
+2. **E03 YFinance:** retry machinery is behaviorally inactive on the ordinary wrapped transport path, but undecorated behavior exposes native exceptions while the decorated path exposes `DataFetchError` (with preserved cause). `net_complexity_result = UNKNOWN`; compatibility-visible semantics require SHADOW MORE.
+3. **E08 config literals:** five aligned backend/numeric defaults are measured across runtime constants, registry metadata, and `.env.example`; no production owner was deleted. `net_complexity_result = UNKNOWN`.
+4. **E11 positive snapshot cache mechanics:** TTL predicate boundary is Shadow-pass only; miss/empty and negative-age behavior also match the model, but lifecycle/read-set evidence is absent. `net_complexity_result = UNKNOWN`.
 
 ## Candidate downgraded after evidence
 
@@ -151,11 +151,11 @@ Historical sync/delta packets remain in `docs/research/cross-project-sync-minima
 
 ```text
 branch: research/minimal-core-initiative-v0-1
-head: de42ff52d0c134960520503f51d7481238df4fc2
-commit: research: compact Minimal Core read-set
+head: 28865aed45fe65a28c5527b777762325a16a666a
+commit: test(research): expand E03 provider differential matrix
 mode: Research / Shadow only
 production runtime: unchanged
 PR #71: open, unmerged
-exact-head checks: CI #229 success; Research Radar Tests #247 success
-changed-files: CURRENT_COUNT_UNKNOWN (no reliable current metadata recorded)
+exact-head checks: CI #232 success; Research Radar Tests #250 success
+changed-files: 32 (PR metadata; this head adds 3 files / 83 net lines from its parent)
 ```

@@ -22,6 +22,13 @@ yf.download
 
 This means the presence of `stop_after_attempt(3)` does not, by itself, prove that the ordinary wrapped transport path actually retries.
 
+The expanded Shadow matrix records one provider call for `ConnectionError`,
+`TimeoutError`, provider-raised `DataFetchError`, parser `ValueError`, and an
+empty dataframe. Transport/parser failures surface as `DataFetchError` with the
+original exception as `__cause__`; an already-created `DataFetchError` remains
+the same object. The undecorated `__wrapped__` body instead exposes the native
+transport exception. This causal/surface difference is compatibility-visible.
+
 ## Why this matters for Minimal Core
 
 This is a potential **DELETE/SIMPLIFY** candidate, but not yet a fix candidate.
@@ -33,6 +40,10 @@ Three possible future decisions exist:
 3. **Narrow the exception wrapper** so retryable transport exceptions escape to Tenacity, again a behavior change requiring separate governance.
 
 E03-B does not choose among them.
+
+`net_complexity_result = UNKNOWN`: the call-count evidence supports a dead/no-op
+retry-controller hypothesis, but does not prove that deleting the decorator and
+its policy imports preserves the decorated exception surface.
 
 ## Hard constraints
 

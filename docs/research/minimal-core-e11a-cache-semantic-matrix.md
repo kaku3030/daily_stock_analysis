@@ -184,3 +184,8 @@ A cache simplification candidate requires:
 - **REJECT** treating cooldown, credentials or authoritative runtime state as cache.
 
 The Minimal Core win here is likely modest deletion of repeated timestamp-dictionary mechanics—not a cache subsystem.
+
+Current result: `net_complexity_result = UNKNOWN`. The existing Shadow test
+covers the strict TTL boundary and basic positive/miss behavior only; it does
+not establish equivalent write, clear, locking, logging, restart, or total
+read-set semantics. No helper or dependency is justified by this evidence.
