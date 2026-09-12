@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import json
 from typing import Any, Mapping
 
 from src.services.a_share_intraday_semantics import CN_INTRADAY_ENDPOINT_EXTENSIONS
@@ -22,6 +23,8 @@ from .raw_capture import (
     build_row_normalization_lineage,
 )
 from .recorded_fixture import _ROW_KEYS, _decimal_text, _parse_aware, _require_exact_keys
+from .strict_json import loads_strict_json
+
 from .replay_contract import (
     EventRecord,
     SourceAuthorityResolution,
@@ -96,8 +99,8 @@ def _assert_capture_authority_sources_still_match_accepted_versions() -> None:
 
 
 @dataclass(frozen=True)
-class _CapturedProviderAuthorityPayload:
-    """Digest-bound payload; not by itself admissible as provider authority."""
+class CapturedProviderAuthorityReceipt:
+    """Canonical capture-time authority evidence suitable for persistence."""
 
     schema_version: str
     source_token: str
@@ -111,21 +114,17 @@ class _CapturedProviderAuthorityPayload:
     observation_id: str
     a0_authority_source_ref: str
     a1_authority_source_ref: str
+    a0_registry_snapshot: Mapping[str, Any]
+    a1_extension_snapshot: Mapping[str, Any]
     digest: str
 
     def __post_init__(self) -> None:
         if self.schema_version != CAPTURED_PROVIDER_AUTHORITY_SCHEMA_VERSION:
             raise ValueError(f"unsupported captured provider authority: {self.schema_version}")
         for name in (
-            "source_token",
-            "endpoint_id",
-            "market",
-            "adapter_id",
-            "upstream_lineage_id",
-            "capture_id",
-            "observation_id",
-            "a0_authority_source_ref",
-            "a1_authority_source_ref",
+            "source_token", "endpoint_id", "market", "adapter_id",
+            "upstream_lineage_id", "capture_id", "observation_id",
+            "a0_authority_source_ref", "a1_authority_source_ref",
         ):
             _trimmed(getattr(self, name), name)
         if self.market != "cn":
@@ -139,8 +138,34 @@ class _CapturedProviderAuthorityPayload:
             raise ValueError("captured authority does not pin accepted A0 source version")
         if self.a1_authority_source_ref != A1_AUTHORITY_SOURCE_REF:
             raise ValueError("captured authority does not pin accepted A1 source version")
+
+        a0_snapshot = deep_freeze(dict(self.a0_registry_snapshot))
+        a1_snapshot = deep_freeze(dict(self.a1_extension_snapshot))
+        object.__setattr__(self, "a0_registry_snapshot", a0_snapshot)
+        object.__setattr__(self, "a1_extension_snapshot", a1_snapshot)
+        if stable_hash(a0_snapshot) != A0_ACCEPTED_REGISTRY_DIGEST:
+            raise ValueError("captured authority A0 snapshot digest mismatch")
+        if stable_hash(a1_snapshot) != A1_ACCEPTED_EXTENSION_DIGEST:
+            raise ValueError("captured authority A1 snapshot digest mismatch")
+
+        lineage = a0_snapshot.get(self.source_token)
+        if not isinstance(lineage, Mapping):
+            raise ValueError("captured authority source is not admitted by pinned A0 snapshot")
+        if self.market not in tuple(lineage.get("markets", ())):
+            raise ValueError("captured authority market is not admitted by pinned A0 snapshot")
+        if lineage.get("adapter_id") != self.adapter_id:
+            raise ValueError("captured authority adapter does not match pinned A0 snapshot")
+        if lineage.get("upstream_lineage_id") != self.upstream_lineage_id:
+            raise ValueError("captured authority upstream lineage does not match pinned A0 snapshot")
+        allowed_endpoints = tuple(a1_snapshot.get(self.source_token, ()))
+        if self.endpoint_id not in allowed_endpoints:
+            raise ValueError("captured authority endpoint is not admitted by pinned A1 snapshot")
         if self.digest != stable_hash(self.digest_payload()):
             raise ValueError("captured provider authority digest mismatch")
+
+    @staticmethod
+    def _time_text(value: datetime) -> str:
+        return value.isoformat(timespec="microseconds").replace("+00:00", "Z")
 
     def digest_payload(self) -> dict[str, Any]:
         return {
@@ -150,57 +175,88 @@ class _CapturedProviderAuthorityPayload:
             "market": self.market,
             "adapter_id": self.adapter_id,
             "upstream_lineage_id": self.upstream_lineage_id,
-            "captured_at": self.captured_at,
+            "captured_at": self._time_text(self.captured_at),
             "raw_artifact_sha256": self.raw_artifact_sha256,
             "capture_id": self.capture_id,
             "observation_id": self.observation_id,
             "a0_authority_source_ref": self.a0_authority_source_ref,
             "a1_authority_source_ref": self.a1_authority_source_ref,
+            "a0_registry_snapshot": self.a0_registry_snapshot,
+            "a1_extension_snapshot": self.a1_extension_snapshot,
         }
 
     def canonical_payload(self) -> dict[str, Any]:
         return self.digest_payload() | {"digest": self.digest}
 
+    def to_json_bytes(self) -> bytes:
+        def thaw(value: Any) -> Any:
+            if isinstance(value, Mapping):
+                return {key: thaw(item) for key, item in value.items()}
+            if isinstance(value, tuple):
+                return [thaw(item) for item in value]
+            if isinstance(value, list):
+                return [thaw(item) for item in value]
+            return value
 
-_CAPTURE_AUTHORITY_ORIGIN = object()
+        return json.dumps(
+            thaw(self.canonical_payload()),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "CapturedProviderAuthorityReceipt":
+        expected = {
+            "schema_version", "source_token", "endpoint_id", "market",
+            "adapter_id", "upstream_lineage_id", "captured_at",
+            "raw_artifact_sha256", "capture_id", "observation_id",
+            "a0_authority_source_ref", "a1_authority_source_ref",
+            "a0_registry_snapshot", "a1_extension_snapshot", "digest",
+        }
+        if set(payload) != expected:
+            raise ValueError("captured authority receipt schema mismatch")
+        captured_at = _parse_aware(payload["captured_at"], "captured authority receipt captured_at")
+        return cls(
+            schema_version=payload["schema_version"],
+            source_token=payload["source_token"],
+            endpoint_id=payload["endpoint_id"],
+            market=payload["market"],
+            adapter_id=payload["adapter_id"],
+            upstream_lineage_id=payload["upstream_lineage_id"],
+            captured_at=captured_at,
+            raw_artifact_sha256=payload["raw_artifact_sha256"],
+            capture_id=payload["capture_id"],
+            observation_id=payload["observation_id"],
+            a0_authority_source_ref=payload["a0_authority_source_ref"],
+            a1_authority_source_ref=payload["a1_authority_source_ref"],
+            a0_registry_snapshot=payload["a0_registry_snapshot"],
+            a1_extension_snapshot=payload["a1_extension_snapshot"],
+            digest=payload["digest"],
+        )
 
 
 class VerifiedCapturedProviderAuthority:
-    """Provider authority that can only originate from the capture-time factory.
+    """Authority reconstructed only from persisted canonical receipt bytes."""
 
-    The wrapper closes the ordinary-constructor bypass: a digest-valid arbitrary
-    payload is not enough to become authority.  This is an audit integrity
-    boundary, not a cryptographic trusted-clock claim.
-    """
-
-    __slots__ = ("_payload", "_origin")
+    __slots__ = ("_receipt_bytes",)
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        raise TypeError("VerifiedCapturedProviderAuthority requires capture-time factory")
+        raise TypeError("VerifiedCapturedProviderAuthority requires persisted capture receipt")
 
     @classmethod
-    def _from_capture(
-        cls,
-        payload: _CapturedProviderAuthorityPayload,
-        origin: object,
-    ) -> "VerifiedCapturedProviderAuthority":
-        if origin is not _CAPTURE_AUTHORITY_ORIGIN:
-            raise ValueError("captured provider authority origin is not verified")
+    def _from_persisted_receipt(cls, receipt_bytes: bytes) -> "VerifiedCapturedProviderAuthority":
+        receipt = _parse_captured_provider_authority_receipt(receipt_bytes)
         instance = object.__new__(cls)
-        object.__setattr__(instance, "_payload", payload)
-        object.__setattr__(instance, "_origin", origin)
+        object.__setattr__(instance, "_receipt_bytes", receipt.to_json_bytes())
         return instance
 
-    def _verified_payload(self) -> _CapturedProviderAuthorityPayload:
+    def _verified_payload(self) -> CapturedProviderAuthorityReceipt:
         try:
-            payload = self._payload
-            origin = self._origin
+            receipt_bytes = self._receipt_bytes
         except AttributeError as exc:
             raise ValueError("captured provider authority is not verified") from exc
-        if origin is not _CAPTURE_AUTHORITY_ORIGIN:
-            raise ValueError("captured provider authority origin is not verified")
-        # Reconstruct to re-run all digest/source-version validation before use.
-        return _CapturedProviderAuthorityPayload(**payload.canonical_payload())
+        return _parse_captured_provider_authority_receipt(receipt_bytes)
 
     def __setattr__(self, name: str, value: Any) -> None:
         raise TypeError("VerifiedCapturedProviderAuthority is immutable")
@@ -256,6 +312,9 @@ class VerifiedCapturedProviderAuthority:
     def canonical_payload(self) -> dict[str, Any]:
         return self._verified_payload().canonical_payload()
 
+    def persisted_receipt_bytes(self) -> bytes:
+        return bytes(self._receipt_bytes)
+
     def historical_resolver(self) -> SourceAuthorityResolver:
         payload = self._verified_payload()
 
@@ -278,6 +337,23 @@ class VerifiedCapturedProviderAuthority:
         return resolve
 
 
+def _parse_captured_provider_authority_receipt(raw: bytes | str) -> CapturedProviderAuthorityReceipt:
+    payload = loads_strict_json(raw, "captured provider authority receipt")
+    if not isinstance(payload, Mapping):
+        raise ValueError("captured provider authority receipt must be a JSON object")
+    return CapturedProviderAuthorityReceipt.from_mapping(payload)
+
+
+def load_captured_provider_authority_receipt(raw: bytes | str) -> VerifiedCapturedProviderAuthority:
+    """Load persisted receipt bytes and revalidate all pinned authority evidence."""
+
+    if isinstance(raw, str):
+        raw = raw.encode("utf-8")
+    if not isinstance(raw, bytes) or not raw:
+        raise ValueError("captured provider authority receipt bytes are required")
+    return VerifiedCapturedProviderAuthority._from_persisted_receipt(raw)
+
+
 def capture_current_a_share_provider_authority(
     sealed: SealedRawCapture,
     *,
@@ -285,13 +361,8 @@ def capture_current_a_share_provider_authority(
     source_token: str,
     endpoint_id: str,
     market: str = "cn",
-) -> VerifiedCapturedProviderAuthority:
-    """Explicit capture-time factory; conversion never calls it implicitly.
-
-    Governance note: this helper is for contemporaneous capture pipelines.  It
-    must not be used to retroactively mint historical authority for an old raw
-    artifact that did not persist authority evidence at capture time.
-    """
+) -> CapturedProviderAuthorityReceipt:
+    """Mint capture-time receipt evidence; callers must persist bytes before later use."""
 
     if not isinstance(sealed, SealedRawCapture):
         raise ValueError("captured authority requires a verified SealedRawCapture")
@@ -312,15 +383,18 @@ def capture_current_a_share_provider_authority(
         "market": market,
         "adapter_id": lineage.adapter_id,
         "upstream_lineage_id": lineage.upstream_lineage_id,
-        "captured_at": observed_at,
+        "captured_at": CapturedProviderAuthorityReceipt._time_text(observed_at),
         "raw_artifact_sha256": sealed.manifest.artifact_sha256,
         "capture_id": artifact.capture_id,
         "observation_id": observation_id,
         "a0_authority_source_ref": A0_AUTHORITY_SOURCE_REF,
         "a1_authority_source_ref": A1_AUTHORITY_SOURCE_REF,
+        "a0_registry_snapshot": _authority_registry_payload(),
+        "a1_extension_snapshot": _intraday_extension_payload(),
     }
-    raw = _CapturedProviderAuthorityPayload(**payload, digest=stable_hash(payload))
-    return VerifiedCapturedProviderAuthority._from_capture(raw, _CAPTURE_AUTHORITY_ORIGIN)
+    return CapturedProviderAuthorityReceipt.from_mapping(
+        payload | {"digest": stable_hash(payload)}
+    )
 
 
 @dataclass(frozen=True)

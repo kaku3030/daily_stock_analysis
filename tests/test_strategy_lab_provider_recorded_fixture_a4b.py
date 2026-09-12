@@ -13,10 +13,12 @@ from src.services.strategy_lab.provider_recorded_fixture import (
     NORMALIZER_SHA256,
     NORMALIZER_VERSION,
     PROVIDER_RECORDED_FIXTURE_SCHEMA_VERSION,
+    CapturedProviderAuthorityReceipt,
     VerifiedCapturedProviderAuthority,
     capture_current_a_share_provider_authority,
     convert_sealed_capture_to_provider_fixture,
     diagnose_current_provider_authority,
+    load_captured_provider_authority_receipt,
 )
 from src.services.strategy_lab.raw_capture import (
     NORMALIZATION_LINEAGE_VERSION,
@@ -100,7 +102,7 @@ def write_sealed(tmp_path, payload=None):
     return load_sealed_raw_capture(artifact_path, manifest_path)
 
 
-def capture_authority(sealed):
+def capture_receipt(sealed):
     return capture_current_a_share_provider_authority(
         sealed,
         observation_id="history-cn-15m-1",
@@ -108,6 +110,11 @@ def capture_authority(sealed):
         endpoint_id="akshare.eastmoney_intraday",
         market="cn",
     )
+
+
+def capture_authority(sealed):
+    receipt = capture_receipt(sealed)
+    return load_captured_provider_authority_receipt(receipt.to_json_bytes())
 
 
 def make_fixture(tmp_path):
@@ -144,7 +151,7 @@ def test_valid_verified_capture_converts_with_one_to_one_lineage(tmp_path):
 
 
 def test_verified_authority_cannot_be_constructed_directly():
-    with pytest.raises(TypeError, match="capture-time factory"):
+    with pytest.raises(TypeError, match="persisted capture receipt"):
         VerifiedCapturedProviderAuthority()
 
 
@@ -181,10 +188,12 @@ def test_capture_time_authority_is_digest_bound_to_raw_artifact(tmp_path):
     assert canonical["digest"] == stable_hash({k: v for k, v in canonical.items() if k != "digest"})
 
 
-def test_internal_authority_payload_tamper_is_revalidated_before_conversion(tmp_path):
+def test_persisted_authority_receipt_tamper_is_revalidated_before_conversion(tmp_path):
     sealed, authority, _ = make_fixture(tmp_path)
-    object.__setattr__(authority._payload, "source_token", "forged")
-    with pytest.raises(ValueError, match="digest mismatch"):
+    payload = json.loads(authority.persisted_receipt_bytes())
+    payload["source_token"] = "forged"
+    object.__setattr__(authority, "_receipt_bytes", json.dumps(payload).encode("utf-8"))
+    with pytest.raises(ValueError):
         convert_sealed_capture_to_provider_fixture(
             sealed,
             observation_id="history-cn-15m-1",
@@ -435,3 +444,138 @@ def test_conversion_has_no_current_registry_or_provider_side_effect_dependency(m
         fixture_id="side-effect-free",
     )
     assert len(fixture.rows) == 2
+
+
+def _receipt_json_for(sealed):
+    return json.loads(capture_receipt(sealed).to_json_bytes())
+
+
+def _rehash_receipt(payload):
+    body = {key: value for key, value in payload.items() if key != "digest"}
+    payload["digest"] = stable_hash(body)
+    return payload
+
+
+def _load_receipt_payload(payload):
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return load_captured_provider_authority_receipt(raw)
+
+
+def test_capture_receipt_must_be_persisted_and_reloaded_before_conversion(tmp_path):
+    sealed = write_sealed(tmp_path)
+    receipt = capture_receipt(sealed)
+    assert isinstance(receipt, CapturedProviderAuthorityReceipt)
+    with pytest.raises(ValueError, match="verified captured provider authority"):
+        convert_sealed_capture_to_provider_fixture(
+            sealed,
+            observation_id="history-cn-15m-1",
+            authority=receipt,
+            fixture_id="receipt-not-reloaded",
+        )
+
+
+def test_private_receipt_loader_cannot_mint_arbitrary_source_authority(tmp_path):
+    sealed = write_sealed(tmp_path)
+    payload = _receipt_json_for(sealed)
+    payload["source_token"] = "forged_source"
+    _rehash_receipt(payload)
+    with pytest.raises(ValueError, match="not admitted by pinned A0 snapshot"):
+        VerifiedCapturedProviderAuthority._from_persisted_receipt(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        )
+
+
+def test_self_digest_consistent_receipt_with_forged_adapter_is_rejected(tmp_path):
+    sealed = write_sealed(tmp_path)
+    payload = _receipt_json_for(sealed)
+    payload["adapter_id"] = "forged-adapter"
+    _rehash_receipt(payload)
+    with pytest.raises(ValueError, match="adapter does not match"):
+        _load_receipt_payload(payload)
+
+
+def test_receipt_digest_tamper_is_rejected(tmp_path):
+    payload = _receipt_json_for(write_sealed(tmp_path))
+    payload["digest"] = "0" * 64
+    with pytest.raises(ValueError, match="digest mismatch"):
+        _load_receipt_payload(payload)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("endpoint_id", "forged.endpoint", "endpoint is not admitted"),
+        ("market", "hk", "first slice supports A-share"),
+        ("upstream_lineage_id", "forged-upstream", "upstream lineage does not match"),
+        ("a0_authority_source_ref", "forged-a0", "does not pin accepted A0"),
+        ("a1_authority_source_ref", "forged-a1", "does not pin accepted A1"),
+    ],
+)
+def test_receipt_authority_field_mutations_fail_closed(tmp_path, field, value, match):
+    payload = _receipt_json_for(write_sealed(tmp_path))
+    payload[field] = value
+    _rehash_receipt(payload)
+    with pytest.raises(ValueError, match=match):
+        _load_receipt_payload(payload)
+
+
+def test_pinned_a0_snapshot_mutation_cannot_be_rehashed_into_acceptance(tmp_path):
+    payload = _receipt_json_for(write_sealed(tmp_path))
+    payload["a0_registry_snapshot"]["akshare_em"]["adapter_id"] = "forged-adapter"
+    _rehash_receipt(payload)
+    with pytest.raises(ValueError, match="A0 snapshot digest mismatch"):
+        _load_receipt_payload(payload)
+
+
+def test_pinned_a1_snapshot_mutation_cannot_be_rehashed_into_acceptance(tmp_path):
+    payload = _receipt_json_for(write_sealed(tmp_path))
+    payload["a1_extension_snapshot"]["akshare_em"] = ["forged.endpoint"]
+    _rehash_receipt(payload)
+    with pytest.raises(ValueError, match="A1 snapshot digest mismatch"):
+        _load_receipt_payload(payload)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("capture_id", "other-capture", "different capture/observation"),
+        ("observation_id", "other-observation", "different capture/observation"),
+        ("captured_at", "2026-09-10T10:00:03.000000Z", "time does not match"),
+        ("raw_artifact_sha256", "1" * 64, "different raw artifact"),
+    ],
+)
+def test_rehashed_receipt_binding_mutations_rejected_at_conversion(tmp_path, field, value, match):
+    sealed = write_sealed(tmp_path)
+    payload = _receipt_json_for(sealed)
+    payload[field] = value
+    authority = _load_receipt_payload(_rehash_receipt(payload))
+    with pytest.raises(ValueError, match=match):
+        convert_sealed_capture_to_provider_fixture(
+            sealed,
+            observation_id="history-cn-15m-1",
+            authority=authority,
+            fixture_id="binding-mutation",
+        )
+
+
+def test_legitimate_receipt_round_trip_is_byte_deterministic_and_resolver_stable(tmp_path):
+    sealed = write_sealed(tmp_path)
+    receipt = capture_receipt(sealed)
+    raw = receipt.to_json_bytes()
+    first = load_captured_provider_authority_receipt(raw)
+    second = load_captured_provider_authority_receipt(first.persisted_receipt_bytes())
+    assert first.persisted_receipt_bytes() == second.persisted_receipt_bytes() == raw
+    assert first.digest == second.digest
+    resolver = second.historical_resolver()
+    resolved = resolver("akshare_em", "akshare.eastmoney_intraday", "cn")
+    assert resolved is not None
+    assert resolved.authority_ref == f"captured-provider-authority:sha256:{second.digest}"
+    fixture = convert_sealed_capture_to_provider_fixture(
+        sealed,
+        observation_id="history-cn-15m-1",
+        authority=second,
+        fixture_id="round-trip",
+    )
+    first_ids = tuple(event.event_id for event in fixture.materialize_events())
+    second_ids = tuple(event.event_id for event in fixture.materialize_events())
+    assert first_ids == second_ids
