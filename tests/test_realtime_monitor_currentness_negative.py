@@ -2,6 +2,8 @@ import ast
 from datetime import datetime, time, timedelta
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVER = ROOT / "realtime_monitor" / "server.py"
@@ -63,6 +65,7 @@ def _load_currentness_functions():
     wanted = {
         "_us_session_phase",
         "_expected_latest_trading_date",
+        "expected_completed_bar_end",
         "_data_health_check_core",
     }
     nodes = [
@@ -105,7 +108,7 @@ def test_15m_same_date_alone_cannot_prove_currentness():
 
     assert result["ok"] is False
     assert result["status"] == "CURRENTNESS_UNVERIFIED"
-    assert result["reason_codes"] == ["INTRADAY_PROGRESS_NOT_PROVEN"]
+    assert result["reason_codes"] == ["LATEST_BAR_NOT_ON_EXPECTED_COMPLETED_BOUNDARY"]
 
 
 def test_1h_same_date_alone_cannot_prove_currentness():
@@ -118,7 +121,7 @@ def test_1h_same_date_alone_cannot_prove_currentness():
 
     assert result["ok"] is False
     assert result["status"] == "CURRENTNESS_UNVERIFIED"
-    assert result["reason_codes"] == ["INTRADAY_PROGRESS_NOT_PROVEN"]
+    assert result["reason_codes"] == ["LATEST_BAR_NOT_ON_EXPECTED_COMPLETED_BOUNDARY"]
 
 
 def test_daily_same_expected_trading_date_keeps_existing_ok_semantics():
@@ -160,7 +163,39 @@ def test_older_than_expected_trading_date_remains_stale():
 
     assert result["ok"] is False
     assert result["status"] == "STALE_OR_MISALIGNED"
-    assert result["reason_codes"] == ["LATEST_BAR_BEFORE_EXPECTED_SESSION"]
+
+
+@pytest.mark.parametrize("timeframe, now, expected", [
+    ("15m", datetime(2026, 9, 10, 9, 44), None),
+    ("15m", datetime(2026, 9, 10, 10, 1), time(10, 0)),
+    ("15m", datetime(2026, 9, 10, 16, 0), time(16, 0)),
+    ("60m", datetime(2026, 9, 10, 15, 59), time(15, 30)),
+    ("60m", datetime(2026, 9, 10, 16, 0), time(16, 0)),
+])
+def test_expected_completed_bar_end_uses_frozen_rth_grids(timeframe, now, expected):
+    functions = _load_currentness_functions()
+    assert functions["expected_completed_bar_end"](now, timeframe) == expected
+
+
+def test_half_day_does_not_promote_positive_currentness():
+    result = _check(
+        timeframe="15m",
+        latest_bar_time="2026-09-10 13:00:00",
+        now_et=datetime(2026, 9, 10, 16, 0),
+        trading_day_map={"2026-09-10": "HALF"},
+    )
+    assert result["status"] == "CURRENTNESS_UNVERIFIED"
+
+
+def test_future_bar_date_remains_fail_closed():
+    result = _check(
+        timeframe="15m",
+        latest_bar_time="2026-09-11 16:00:00",
+        now_et=datetime(2026, 9, 10, 16, 0),
+        trading_day_map={"2026-09-10": "WHOLE", "2026-09-11": "WHOLE"},
+    )
+    assert result["status"] == "STALE_OR_MISALIGNED"
+    assert result["reason_codes"] == ["LATEST_BAR_AHEAD_OF_EXPECTED_SESSION"]
 
 
 def test_ahead_of_expected_trading_date_remains_fail_closed():
