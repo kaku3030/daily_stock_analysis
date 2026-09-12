@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.e06_benchmark import LAYERS, PROTECTED_CONTRACTS, make_row, validate_row
+from scripts.e06_benchmark import LAYERS, PROTECTED_CONTRACTS, make_fresh_context_attestation, make_row, validate_row
 
 
 def test_row_keeps_three_layers_and_pending_fresh_context():
@@ -41,7 +41,7 @@ def test_non_passing_protected_contract_is_not_pass(bad):
 
 def test_all_explicit_protected_contracts_pass():
     row = _fresh_with_gate({name: "PASS" for name in PROTECTED_CONTRACTS})
-    validate_row(row)
+    validate_row(row, fresh_context_attestation=make_fresh_context_attestation(task_id="T1", run_id="x"))
 
 
 def test_fresh_sample_can_be_eligible_only_after_correctness():
@@ -66,3 +66,35 @@ def test_current_chat_cannot_be_promoted_by_toggling_fields():
 def test_unknown_metric_is_rejected():
     with pytest.raises(ValueError, match="unknown metrics"):
         make_row(task_id="T1", run_id="x", context="fresh", typo_metric=1)
+
+
+def test_current_chat_full_row_forgery_without_attestation_is_rejected():
+    row = make_row(task_id="T1", run_id="x", context="current-chat")
+    row.update({"context": "fresh", "contamination": False, "official_status": "ELIGIBLE",
+                "fresh_context_identity": "fresh-context-v0.1",
+                "fresh_context_transition": {"validated": True, "source": "fresh-context"},
+                "fresh_context_proof": "looks-valid"})
+    row["correctness_gate"] = {"result": "PASS", "protected_governance": {name: "PASS" for name in PROTECTED_CONTRACTS}}
+    with pytest.raises(ValueError, match="validated fresh context"):
+        validate_row(row)
+
+
+def test_attestation_is_bound_to_task_and_run():
+    row = _fresh_with_gate({name: "PASS" for name in PROTECTED_CONTRACTS})
+    with pytest.raises(ValueError, match="validated fresh context"):
+        validate_row(row, fresh_context_attestation=make_fresh_context_attestation(task_id="T1", run_id="other"))
+
+
+def test_missing_or_unknown_attestation_is_rejected():
+    row = _fresh_with_gate({name: "PASS" for name in PROTECTED_CONTRACTS})
+    for attestation in (None, {"token": "constant"}):
+        with pytest.raises(ValueError, match="validated fresh context"):
+            validate_row(row, fresh_context_attestation=attestation)
+
+
+def test_contaminated_origin_rejects_attestation():
+    row = make_row(task_id="T1", run_id="x", context="current-chat")
+    row.update({"context": "fresh", "contamination": True, "official_status": "ELIGIBLE"})
+    row["correctness_gate"] = {"result": "PENDING", "protected_governance": []}
+    with pytest.raises(ValueError):
+        validate_row(row, fresh_context_attestation=make_fresh_context_attestation(task_id="T1", run_id="x"))

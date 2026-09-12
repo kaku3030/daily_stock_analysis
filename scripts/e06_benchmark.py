@@ -26,6 +26,7 @@ PROTECTED_CONTRACTS = (
 )
 OFFICIAL_STATUSES = ("CONTAMINATED", "PENDING_FRESH_CONTEXT", "ELIGIBLE")
 FRESH_CONTEXT_IDENTITY = "fresh-context-v0.1"
+FRESH_CONTEXT_TRANSITION = {"validated": True, "source": "fresh-context"}
 
 
 def count_tokens(text: str, encoding: str = "cl100k_base") -> int:
@@ -53,10 +54,8 @@ def make_row(*, task_id: str, run_id: str, context: str, contamination: bool = T
         "schema_version": SCHEMA_VERSION, "task_id": task_id, "run_id": run_id,
         "context": context, "contamination": contamination,
         "official_status": "CONTAMINATED" if contamination else "PENDING_FRESH_CONTEXT",
-        "fresh_context_identity": FRESH_CONTEXT_IDENTITY if context == "fresh" else None,
-        "fresh_context_transition": {
-            "validated": True, "source": "fresh-context"
-        } if context == "fresh" else None,
+        "fresh_context_identity": None,
+        "fresh_context_transition": None,
         "layers": {layer: {"text_bytes": len(layer_text[layer].encode("utf-8")),
                            "tokens": count_tokens(layer_text[layer])} for layer in LAYERS},
         "metrics": measured,
@@ -64,7 +63,12 @@ def make_row(*, task_id: str, run_id: str, context: str, contamination: bool = T
     }
 
 
-def validate_row(row: dict[str, Any]) -> None:
+def make_fresh_context_attestation(*, task_id: str, run_id: str) -> dict[str, Any]:
+    return {"schema_version": SCHEMA_VERSION, "task_id": task_id, "run_id": run_id,
+            "identity": FRESH_CONTEXT_IDENTITY, "transition": dict(FRESH_CONTEXT_TRANSITION)}
+
+
+def validate_row(row: dict[str, Any], *, fresh_context_attestation: dict[str, Any] | None = None) -> None:
     if row.get("schema_version") != SCHEMA_VERSION:
         raise ValueError("unsupported schema_version")
     if set(row.get("layers", {})) != set(LAYERS):
@@ -86,15 +90,14 @@ def validate_row(row: dict[str, Any]) -> None:
         or any(evaluations[name] != "PASS" for name in PROTECTED_CONTRACTS)
     ):
         raise ValueError("correctness PASS requires all seven protected contracts to PASS")
-    if status == "ELIGIBLE" and (
-        row.get("context") != "fresh"
-        or row.get("fresh_context_identity") != FRESH_CONTEXT_IDENTITY
-        or row.get("fresh_context_transition") != {
-            "validated": True, "source": "fresh-context"
-        }
-        or row.get("contamination")
-        or result != "PASS"
-    ):
+    attestation_valid = (fresh_context_attestation is not None
+        and fresh_context_attestation.get("schema_version") == SCHEMA_VERSION
+        and fresh_context_attestation.get("task_id") == row.get("task_id")
+        and fresh_context_attestation.get("run_id") == row.get("run_id")
+        and fresh_context_attestation.get("identity") == FRESH_CONTEXT_IDENTITY
+        and fresh_context_attestation.get("transition") == FRESH_CONTEXT_TRANSITION)
+    if status == "ELIGIBLE" and (row.get("context") != "fresh" or row.get("contamination")
+        or result != "PASS" or not attestation_valid):
         raise ValueError("official eligibility requires validated fresh context and correctness PASS")
 
 
