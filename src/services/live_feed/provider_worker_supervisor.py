@@ -41,6 +41,7 @@ from .provider_worker_contracts import (
     ProviderWorkerSupervisorConfig,
     ResolvedProviderCommandOutcome,
 )
+from .provider_worker_child_boundary import execute_fake_command_in_child
 
 __all__ = [
     "AdmissionClosedError",
@@ -164,6 +165,17 @@ def _fake_child_main(
             # Cooperative stop signal (graceful shutdown path only; the
             # parent NEVER relies on this alone for hard-kill semantics).
             os._exit(0)
+
+        # PBLC-S1: all fake execution crosses this single provider-neutral
+        # child-only seam. The legacy inline branches below remain unreachable
+        # compatibility text until the next bounded cleanup slice.
+        execute_fake_command_in_child(
+            command,
+            result_queue=result_queue,
+            release_event=release_event,
+            worker_generation=worker_generation,
+        )
+        continue
 
         command_id = command.get("command_id")
         behavior = (command.get("payload") or {}).get("behavior", "success")
