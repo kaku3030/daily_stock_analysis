@@ -26,11 +26,31 @@ def test_unknown_source_event_does_not_create_catalyst_latency():
 
 
 def test_timestamp_order_and_latency_split():
-    trace = LatencyTrace(data_received_at=2, knowledge_available_at=3, strategy_decided_at=7, execution_ready_at=9)
-    assert trace.system_latency() == 7
+    trace = LatencyTrace(
+        data_received_at=2,
+        knowledge_available_at=3,
+        detected_at=5,
+        strategy_decided_at=7,
+        risk_decided_at=8,
+        execution_ready_at=9,
+    )
+    assert trace.system_latency() == 3
     assert trace.policy_wait() == 4
+    assert trace.execution_ready_at - trace.data_received_at > trace.system_latency()
+    assert trace.system_latency() + trace.policy_wait() == trace.execution_ready_at - trace.data_received_at
     with pytest.raises(ValueError):
         LatencyTrace(data_received_at=4, detected_at=3)
+
+
+def test_latency_segments_do_not_bridge_missing_timestamps():
+    trace = LatencyTrace(data_received_at=2, strategy_decided_at=7, execution_ready_at=9)
+    assert trace.system_latency() is None
+    assert trace.policy_wait() is None
+
+
+def test_source_event_at_quality_rejects_raw_strings():
+    with pytest.raises(TypeError):
+        LatencyTrace(source_event_at=1, source_event_at_quality="EXACT")
 
 
 def test_serialization_is_stable_and_validation_queue_contract_is_unchanged():

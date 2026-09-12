@@ -28,6 +28,8 @@ class LatencyTrace:
     fill_at: float | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.source_event_at_quality, SourceEventAtQuality):
+            raise TypeError("source_event_at_quality must be a SourceEventAtQuality")
         values = [getattr(self, name) for name in _TIMESTAMP_FIELDS]
         present = [value for value in values if value is not None]
         if any(value < 0 for value in present) or any(a > b for a, b in zip(present, present[1:])):
@@ -41,9 +43,13 @@ class LatencyTrace:
         return {**asdict(self), "source_event_at_quality": self.source_event_at_quality.value}
 
     def system_latency(self) -> float | None:
-        if self.data_received_at is None or self.execution_ready_at is None:
-            return None
-        return self.execution_ready_at - self.data_received_at
+        segments = (
+            (self.data_received_at, self.knowledge_available_at),
+            (self.strategy_decided_at, self.risk_decided_at),
+            (self.risk_decided_at, self.execution_ready_at),
+        )
+        durations = [end - start for start, end in segments if start is not None and end is not None]
+        return sum(durations) if durations else None
 
     def policy_wait(self) -> float | None:
         if self.knowledge_available_at is None or self.strategy_decided_at is None:
