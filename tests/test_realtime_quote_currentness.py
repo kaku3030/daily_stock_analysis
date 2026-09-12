@@ -116,6 +116,46 @@ def test_implausibly_future_provider_time_fails_closed() -> None:
     assert decision.reason == "PROVIDER_TIMESTAMP_IN_FUTURE"
 
 
+
+def test_any_future_provider_time_fails_closed_without_skew_tolerance() -> None:
+    for delta in (
+        timedelta(microseconds=1),
+        timedelta(seconds=1),
+        timedelta(seconds=4, microseconds=999999),
+    ):
+        decision = evaluate_quote_currentness(
+            _quote(provider_timestamp=(NOW + delta).isoformat()),
+            now_utc=NOW,
+            max_age_seconds=60,
+        )
+        assert decision.currentness_passed is False
+        assert decision.status is QuoteCurrentnessStatus.DATA_UNHEALTHY
+        assert decision.reason == "PROVIDER_TIMESTAMP_IN_FUTURE"
+        assert decision.age_seconds is not None
+        assert decision.age_seconds < 0
+
+
+def test_exact_now_provider_timestamp_can_pass() -> None:
+    decision = evaluate_quote_currentness(
+        _quote(provider_timestamp=NOW.isoformat(), stale_seconds=0),
+        now_utc=NOW,
+        max_age_seconds=60,
+    )
+    assert decision.currentness_passed is True
+    assert decision.status is QuoteCurrentnessStatus.FRESH
+    assert decision.reason == "CURRENTNESS_OK"
+    assert decision.age_seconds == 0
+
+
+def test_future_skew_caller_override_no_longer_exists() -> None:
+    with pytest.raises(TypeError, match="max_future_skew_seconds"):
+        evaluate_quote_currentness(
+            _quote(provider_timestamp=(NOW + timedelta(seconds=1)).isoformat()),
+            now_utc=NOW,
+            max_age_seconds=60,
+            max_future_skew_seconds=999,
+        )
+
 def test_upstream_stale_flag_is_hard_block_even_when_timestamp_looks_fresh() -> None:
     decision = evaluate_quote_currentness(
         _quote(is_stale=True, stale_seconds=1),

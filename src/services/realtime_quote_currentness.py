@@ -21,7 +21,6 @@ from enum import Enum
 from typing import Any, Optional
 
 
-DEFAULT_MAX_FUTURE_SKEW_SECONDS = 5
 _ACCEPTED_DATA_QUALITY = frozenset({"ok", "partial"})
 
 
@@ -134,7 +133,6 @@ def evaluate_quote_currentness(
     *,
     max_age_seconds: int,
     now_utc: Optional[datetime] = None,
-    max_future_skew_seconds: int = DEFAULT_MAX_FUTURE_SKEW_SECONDS,
 ) -> QuoteCurrentnessDecision:
     """Evaluate quote timestamp-currentness under a caller-owned age policy.
 
@@ -147,7 +145,6 @@ def evaluate_quote_currentness(
     max_age = int(max_age_seconds)
     if max_age <= 0:
         raise ValueError("max_age_seconds must be positive")
-    max_future_skew = max(0, int(max_future_skew_seconds))
     source = _source_name(quote)
 
     if quote is None:
@@ -189,7 +186,7 @@ def evaluate_quote_currentness(
     now = now.astimezone(timezone.utc)
     age_seconds = (now - provider_dt).total_seconds()
 
-    if age_seconds < -max_future_skew:
+    if age_seconds < 0:
         return QuoteCurrentnessDecision(
             currentness_passed=False,
             status=QuoteCurrentnessStatus.DATA_UNHEALTHY,
@@ -266,7 +263,7 @@ def evaluate_quote_currentness(
         status=QuoteCurrentnessStatus.FRESH,
         reason="CURRENTNESS_OK",
         provider_timestamp=provider_dt,
-        age_seconds=max(0.0, age_seconds),
+        age_seconds=age_seconds,
         max_age_seconds=max_age,
         source=source,
         data_quality=data_quality,
