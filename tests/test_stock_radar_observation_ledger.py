@@ -6,6 +6,10 @@ from src.services.stock_radar_v2 import (
     ObservationLedger,
     SourceEventAtQuality,
     ValidationQueue,
+    InterruptedReason,
+    MarketExecutionConstraint,
+    ShadowExecutionRecord,
+    interrupted,
 )
 
 
@@ -59,3 +63,37 @@ def test_serialization_is_stable_and_validation_queue_contract_is_unchanged():
     assert '"portfolio_block_reasons":[]' in item.serialize()
     with pytest.raises(ValueError):
         ValidationQueue().enqueue(signal_id="s", signal_type="t", signal_state="rejected")
+
+
+def test_interrupted_reasons_are_stable_and_not_thesis_or_price_invalidation():
+    payload = interrupted(InterruptedReason.DATA_QUALITY_LOSS)
+    assert payload == {"status": "INTERRUPTED", "reason": "DATA_QUALITY_LOSS"}
+    assert "INVALID" not in payload["reason"]
+
+
+def test_shadow_execution_requires_causal_time_and_rejects_same_bar_hindsight():
+    with pytest.raises(ValueError):
+        ShadowExecutionRecord("same", 10, 10, 100, 1, 1, False, "f1", "s1", 0,
+                              decision_available_at=10, confirmed_at=10, bar_end_at=10)
+    record = ShadowExecutionRecord("next", 10, 11, 101, 1, 1, False, "f1", "s1", 100,
+                                   decision_available_at=10, confirmed_at=10, bar_end_at=10)
+    assert record.simulated_fill_at == 11
+
+
+def test_partial_fill_and_unknown_executable_time_remain_auditable():
+    record = ShadowExecutionRecord(
+        "partial", 10, None, None, 3, 5, True, "f1", "s1", None,
+        constraints=(MarketExecutionConstraint.QUEUE_OR_LIQUIDITY,),
+    )
+    assert record.remainder_qty == 2
+    assert record.to_dict()["simulated_fill_at"] is None
+    assert record.to_dict()["constraints"] == ["QUEUE_OR_LIQUIDITY"]
+
+
+def test_interrupted_failure_has_no_fill_and_replay_is_stable():
+    record = ShadowExecutionRecord(
+        "dq", 10, None, None, 0, 5, False, "f1", "s1", None,
+        interrupted_reason=InterruptedReason.PROVIDER_OR_RUNTIME_FAILURE,
+    )
+    assert record.serialize() == record.serialize()
+    assert record.interrupted_reason is InterruptedReason.PROVIDER_OR_RUNTIME_FAILURE
