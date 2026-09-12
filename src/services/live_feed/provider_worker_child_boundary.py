@@ -15,6 +15,9 @@ _ALLOWED_BEHAVIORS = frozenset({
     "exit_before_result", "malformed_frame", "oversized_frame",
 })
 _QUOTE_SNAPSHOT_KEYS = frozenset({"behavior", "read_operation", "symbols", "snapshot"})
+_HISTORY_KLINE_KEYS = frozenset({
+    "behavior", "read_operation", "symbol", "timeframe", "start", "end", "max_count", "bars",
+})
 
 
 def execute_fake_command_in_child(
@@ -33,14 +36,26 @@ def execute_fake_command_in_child(
     payload = command.get("payload")
     if not isinstance(payload, Mapping):
         raise ValueError("child boundary accepts only the bounded behavior field")
-    is_quote_snapshot = payload.get("read_operation") == "QUOTE_SNAPSHOT"
-    allowed_keys = _QUOTE_SNAPSHOT_KEYS if is_quote_snapshot else frozenset({"behavior"})
+    read_operation = payload.get("read_operation")
+    is_quote_snapshot = read_operation == "QUOTE_SNAPSHOT"
+    is_history_kline = read_operation == "HISTORY_KLINE"
+    allowed_keys = (
+        _QUOTE_SNAPSHOT_KEYS if is_quote_snapshot
+        else _HISTORY_KLINE_KEYS if is_history_kline
+        else frozenset({"behavior"})
+    )
     if set(payload) - allowed_keys:
-        raise ValueError("child boundary accepts only the typed QUOTE_SNAPSHOT fields")
+        raise ValueError("child boundary accepts only the typed read fields")
     if is_quote_snapshot:
         symbols = payload.get("symbols")
         if not isinstance(symbols, list) or not symbols or any(not isinstance(s, str) or not s for s in symbols):
             raise ValueError("QUOTE_SNAPSHOT symbols must be a non-empty string list")
+    if is_history_kline:
+        for field in ("symbol", "timeframe", "start", "end"):
+            if not isinstance(payload.get(field), str) or not payload[field].strip():
+                raise ValueError(f"HISTORY_KLINE {field} must be a non-blank string")
+        if isinstance(payload.get("max_count"), bool) or not isinstance(payload.get("max_count"), int) or payload["max_count"] < 1:
+            raise ValueError("HISTORY_KLINE max_count must be a positive integer")
     behavior = payload.get("behavior", "success")
     if not isinstance(behavior, str) or behavior not in _ALLOWED_BEHAVIORS:
         raise ValueError("unsupported fake executor behavior")
@@ -64,6 +79,8 @@ def execute_fake_command_in_child(
     normalized_payload = {"echo": command_id, "child_pid": os.getpid()}
     if is_quote_snapshot:
         normalized_payload.update(dict(payload.get("snapshot") or {}))
+    elif is_history_kline:
+        normalized_payload.update(dict(payload.get("bars") or {}))
     result: dict[str, Any] = {
         "frame_kind": "COMMAND_RESULT", "command_id": command_id,
         "worker_generation": worker_generation,
