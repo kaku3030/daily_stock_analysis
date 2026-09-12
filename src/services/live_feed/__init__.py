@@ -26,6 +26,14 @@ from .controller import (
 )
 from .health import LiveFeedHealth, StreamFeedHealth, SymbolFeedHealth
 from .identity import ControllerGeneration, new_command_id, new_runtime_instance_id
+from .provider_worker_contracts import (
+    ProviderExceptionDisposition,
+    ProviderExecutionOutcome,
+    ProviderWorkerEvidenceKind,
+    ProviderWorkerLifecycleEvidence,
+    ProviderWorkerSupervisorConfig,
+    ResolvedProviderCommandOutcome,
+)
 from .registry import DesiredRegistryEntry, DesiredRegistrySnapshot, DesiredSubscriptionRegistry
 
 __all__ = [
@@ -44,6 +52,12 @@ __all__ = [
     "ProviderCommandExecutor",
     "ProviderCommandResult",
     "ProviderCommandType",
+    "ProviderExceptionDisposition",
+    "ProviderExecutionOutcome",
+    "ProviderWorkerEvidenceKind",
+    "ProviderWorkerLifecycleEvidence",
+    "ProviderWorkerSupervisorConfig",
+    "ResolvedProviderCommandOutcome",
     "StreamFeedHealth",
     "SymbolFeedHealth",
     "WriterConcurrencyViolation",

@@ -55,6 +55,34 @@ class ProviderCommand:
 
 @dataclass(frozen=True)
 class ProviderCommandResult:
+    """``succeeded``/``error`` are legacy, non-authoritative projections
+    kept for backward compatibility only -- new code must read
+    ``provider_execution_outcome`` (and, for its two structured failure
+    kinds, ``provider_error_code``/``provider_error_message``/
+    ``diagnostic_reason``) as the record of truth.
+
+    ``provider_execution_outcome`` holds the exact
+    ``ProviderExecutionOutcome`` member *value* (a plain ``str``, never
+    the enum type itself -- importing the enum here would create a
+    circular import with ``provider_worker_contracts.py``, which already
+    imports from this module; the same str-value-over-boundary pattern is
+    already used for the child<->supervisor wire protocol). It is
+    ``None`` **if and only if** no Supervisor-authoritative terminal fact
+    exists for this command at all (Slice C: an ``AdmissionClosedError``
+    or ``SupervisorFatalError`` observed before any
+    ``ResolvedProviderCommandOutcome`` could be produced) -- it must never
+    be read as UNKNOWN/PROVIDER_REJECTED/PROVIDER_EXCEPTION/TIMEOUT/
+    WORKER_EXITED/PROTOCOL_ERROR/generic-failure, and it is never ``None``
+    for a command that genuinely received a Supervisor resolution.
+    ``worker_generation`` mirrors ``ResolvedProviderCommandOutcome.
+    worker_generation`` verbatim, including its own narrow ``None`` case
+    (never-established generation) -- orthogonal to
+    ``controller_generation``/``desired_registry_revision`` (frozen
+    principle 10: never conflate connection/generation identities), and
+    deliberately excluded from ``is_command_result_stale``, which stays
+    scoped to the two fields below only.
+    """
+
     command_id: str
     command_type: ProviderCommandType
     succeeded: bool
@@ -63,6 +91,11 @@ class ProviderCommandResult:
     completed_at: datetime
     error: str | None = None
     raw_payload: Mapping[str, Any] | None = None
+    worker_generation: int | None = None
+    provider_execution_outcome: str | None = None
+    provider_error_code: str | None = None
+    provider_error_message: str | None = None
+    diagnostic_reason: str | None = None
 
 
 def is_command_result_stale(
