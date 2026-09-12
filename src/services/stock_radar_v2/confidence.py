@@ -54,13 +54,16 @@ def assess_portfolio_confidence(
     score = _score(components, resolved.confidence.portfolio_weights)
     l0_min, l1_min, l2_min = resolved.confidence.portfolio_levels
     if score >= l0_min:
-        level, gate = "L0", "ALLOW_RESEARCH_FLOW"
+        level = "L0"
     elif score >= l1_min:
-        level, gate = "L1", "WATCH_PORTFOLIO_RISK"
+        level = "L1"
     elif score >= l2_min:
-        level, gate = "L2", "RESTRICT_NEW_POSITION"
+        level = "L2"
     else:
-        level, gate = "L3", "BLOCK_NEW_POSITION"
+        level = "L3"
+    # The aggregate score is retained for research diagnostics only.  It must
+    # not become a permission owner or compensate for an independent hard gate.
+    gate = "DIAGNOSTIC_ONLY"
     assessment = PortfolioRiskAssessment(
         portfolio_confidence=score,
         level=level,
