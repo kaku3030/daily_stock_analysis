@@ -151,11 +151,45 @@ Historical sync/delta packets remain in `docs/research/cross-project-sync-minima
 
 ```text
 branch: research/minimal-core-initiative-v0-1
-head: 28865aed45fe65a28c5527b777762325a16a666a
-commit: test(research): expand E03 provider differential matrix
+head: 437728135eda23e0fbfd53aa8f0f2d7d8fa9631e
+commit: docs(research): close E03 E08 E11 evidence
 mode: Research / Shadow only
 production runtime: unchanged
 PR #71: open, unmerged
-exact-head checks: CI #232 success; Research Radar Tests #250 success
-changed-files: 32 (PR metadata; this head adds 3 files / 83 net lines from its parent)
+exact-head checks: CI #219 success; Research Radar Tests #237 success
+changed-files: 46 (PR metadata)
 ```
+
+## E12 production-promotion design review (design only)
+
+Verdict: `READY_FOR_IMPLEMENTATION_REVIEW`, not production authorization.
+
+The smallest proposed patch replaces the three routing-surface groups of
+JP/KR/TW pass-through wrapper calls with one `get_suffix_market(code)` lookup,
+then deletes only wrappers and local booleans proven to add no semantics.
+`market_symbol_utils.py` remains the sole semantic owner. US-before-HK
+precedence, unknown handling, aliases, provider wire formatting, timestamps,
+`UNKNOWN`, reason and risk fields remain protected.
+
+Compatibility surface: direct imports, monkeypatch targets, persisted/replay
+symbol identities, provider adapters and every caller branch. Required negative
+tests cover malformed/empty symbols, ambiguous suffixes, mixed case,
+CN/HK/US precedence, unknown suffixes, direct wrapper imports and provider-wire
+output. Any mismatch is `BLOCKED`; rollback is a single revert and owner review
+is required from AI Monitor/Data Reliability and each routing owner.
+
+Measured Shadow delta: 9 wrapper-call expressions -> 3 lookups, with 3
+pass-through definitions/local booleans removable; `net_complexity_result = SMALLER`.
+Implementation remains owner-gated and production runtime stays unchanged.
+
+## New local DELETE/SIMPLIFY scan
+
+| Candidate | Owner/read-set evidence | Required next evidence | `net_complexity_result` |
+| --- | --- | --- | --- |
+| E12 suffix wrappers | `market_symbol_utils.py`; 9 calls / 3 surfaces | import, precedence and bypass tests | `SMALLER` |
+| E03 YFinance decorator | provider-local; one ordinary call, error surface differs | public/manager exception matrix | `UNKNOWN` |
+| E08 repeated defaults | ConfigManager owner plus registry/example literals | imported-constant Shadow diff | `UNKNOWN` |
+| E11 positive snapshot | provider-local writes/clears plus TTL predicate | lifecycle/concurrency/logging differential | `UNKNOWN` |
+| E10 classifier | two owners with category/detail divergence | preserve retry/fallback/native detail | `LARGER / REJECT` |
+
+No new promotion candidate beyond E12: **`NO NEW PROMOTION CANDIDATE`**.

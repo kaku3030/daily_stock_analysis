@@ -23,6 +23,8 @@ by replay evidence. E11 is deliberately below E08 because matching TTL
 predicates do not yet prove matching lifecycle, concurrency, or observability
 semantics.
 
-No candidate satisfies all promotion gates yet. In particular, none has a
-verified rollback artifact and `net_complexity_result = SMALLER` for the
-production patch.
+No production deletion is authorized by this ranking. E12 has the required
+Shadow complexity result, but implementation still requires the design review,
+owner gate, compatibility surface and adversarial evidence recorded in
+`minimal-core-current-state.md`. All other candidates remain `UNKNOWN` or
+`REJECT`; no new candidate is promoted.
