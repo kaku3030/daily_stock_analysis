@@ -1,0 +1,159 @@
+{
+  "analysis": "futu_k15_k60_timestamp_semantics",
+  "generated_at_utc": "2026-09-12T02:49:43.275941+00:00",
+  "semantic_promotion": "NONE_AUTOMATIC",
+  "snapshots": {
+    "history:K_15M": {
+      "successful_sample_count": 1,
+      "latest_rows": [
+        {
+          "code": "US.QQQ",
+          "name": "纳指100ETF-Invesco QQQ Trust",
+          "time_key": "2026-09-10 16:00:00",
+          "open": 709.135,
+          "close": 708.69,
+          "high": 709.41,
+          "low": 708.28,
+          "pe_ratio": 0.0,
+          "turnover_rate": 0.0,
+          "volume": 2758454.0,
+          "turnover": 1954885620.578,
+          "change_rate": -0.06275250833761362,
+          "last_close": 709.135
+        }
+      ],
+      "sample_time_keys": [
+        [
+          "2026-09-10 09:45:00",
+          "2026-09-10 10:00:00",
+          "2026-09-10 10:15:00",
+          "2026-09-10 10:30:00",
+          "2026-09-10 10:45:00",
+          "2026-09-10 11:00:00",
+          "2026-09-10 11:15:00",
+          "2026-09-10 11:30:00",
+          "2026-09-10 11:45:00",
+          "2026-09-10 12:00:00",
+          "2026-09-10 12:15:00",
+          "2026-09-10 12:30:00",
+          "2026-09-10 12:45:00",
+          "2026-09-10 13:00:00",
+          "2026-09-10 13:15:00",
+          "2026-09-10 13:30:00",
+          "2026-09-10 13:45:00",
+          "2026-09-10 14:00:00",
+          "2026-09-10 14:15:00",
+          "2026-09-10 14:30:00",
+          "2026-09-10 14:45:00",
+          "2026-09-10 15:00:00",
+          "2026-09-10 15:15:00",
+          "2026-09-10 15:30:00",
+          "2026-09-10 15:45:00",
+          "2026-09-10 16:00:00"
+        ]
+      ],
+      "sample_sequence_observations": [
+        {
+          "first_time_key": "2026-09-10T09:45:00-04:00",
+          "last_time_key": "2026-09-10T16:00:00-04:00",
+          "distinct_time_key_count": 26,
+          "observed_span_seconds": 22500.0,
+          "consecutive_key_gap_seconds": [
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0,
+            900.0
+          ],
+          "expected_nominal_interval_seconds": 900,
+          "all_consecutive_gaps_equal_nominal_interval": true,
+          "non_nominal_gap_seconds": [],
+          "adjudication": "MECHANICAL_OBSERVATION_ONLY"
+        }
+      ],
+      "same_time_key_material_mutation": {
+        "2026-09-10 16:00:00": false
+      },
+      "forming_bar_evidence_candidate": "PRESENT_IF_HISTORY_SAME_KEY_MUTATES",
+      "adjudication": "MECHANICAL_OBSERVATION_ONLY"
+    },
+    "history:K_60M": {
+      "successful_sample_count": 1,
+      "latest_rows": [
+        {
+          "code": "US.QQQ",
+          "name": "纳指100ETF-Invesco QQQ Trust",
+          "time_key": "2026-09-10 16:00:00",
+          "open": 709.17,
+          "close": 708.69,
+          "high": 709.43,
+          "low": 708.28,
+          "pe_ratio": 0.0,
+          "turnover_rate": 0.0,
+          "volume": 3772457.0,
+          "turnover": 2673942716.14,
+          "change_rate": -0.06909388307621414,
+          "last_close": 709.18
+        }
+      ],
+      "sample_time_keys": [
+        [
+          "2026-09-10 10:30:00",
+          "2026-09-10 11:30:00",
+          "2026-09-10 12:30:00",
+          "2026-09-10 13:30:00",
+          "2026-09-10 14:30:00",
+          "2026-09-10 15:30:00",
+          "2026-09-10 16:00:00"
+        ]
+      ],
+      "sample_sequence_observations": [
+        {
+          "first_time_key": "2026-09-10T10:30:00-04:00",
+          "last_time_key": "2026-09-10T16:00:00-04:00",
+          "distinct_time_key_count": 7,
+          "observed_span_seconds": 19800.0,
+          "consecutive_key_gap_seconds": [
+            3600.0,
+            3600.0,
+            3600.0,
+            3600.0,
+            3600.0,
+            1800.0
+          ],
+          "expected_nominal_interval_seconds": 3600,
+          "all_consecutive_gaps_equal_nominal_interval": false,
+          "non_nominal_gap_seconds": [
+            1800.0
+          ],
+          "adjudication": "MECHANICAL_OBSERVATION_ONLY"
+        }
+      ],
+      "same_time_key_material_mutation": {
+        "2026-09-10 16:00:00": false
+      },
+      "forming_bar_evidence_candidate": "PRESENT_IF_HISTORY_SAME_KEY_MUTATES",
+      "adjudication": "MECHANICAL_OBSERVATION_ONLY"
+    }
+  }
+}
