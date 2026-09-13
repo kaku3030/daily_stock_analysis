@@ -2,6 +2,9 @@ name: Research Data Capture
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - research/rule-validation-harness-v0-1
   schedule:
     - cron: "30 22 * * 1-5"
 
