@@ -33,9 +33,22 @@ def capture_baostock(symbol: str, start: str, end: str):
 def capture_yfinance(symbol: str, start: str, end: str):
     import yfinance as yf
     frame = yf.download(symbol, start=start, end=end, auto_adjust=False, progress=False)
+    # Recent yfinance releases return MultiIndex columns even for one ticker.
+    # Normalize them before row access so each OHLCV value is scalar.
+    if getattr(frame.columns, "nlevels", 1) > 1:
+        try:
+            frame = frame.xs(symbol, axis=1, level=-1)
+        except (KeyError, ValueError):
+            frame.columns = frame.columns.get_level_values(0)
+
+    def scalar(value):
+        if hasattr(value, "iloc"):
+            return value.iloc[0]
+        return value
+
     rows = []
     for index, row in frame.iterrows():
-        rows.append({"symbol": symbol, "date": index.strftime("%Y-%m-%d"), "open": float(row["Open"]), "high": float(row["High"]), "low": float(row["Low"]), "close": float(row["Close"]), "volume": float(row["Volume"])})
+        rows.append({"symbol": symbol, "date": index.strftime("%Y-%m-%d"), "open": float(scalar(row["Open"])), "high": float(scalar(row["High"])), "low": float(scalar(row["Low"])), "close": float(scalar(row["Close"])), "volume": float(scalar(row["Volume"]))})
     return rows
 
 
