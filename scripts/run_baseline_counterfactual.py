@@ -63,8 +63,17 @@ def main() -> int:
                 "delayed_rule": [False] + base[:-1], "shuffled_placebo": placebo,
                 "regime_conditioned": [signal and returns[i - 1] >= 0 for i, signal in enumerate(base)]}
     friction_bps = args.cost_bps + args.slippage_bps
+    results = {name: _metrics(returns, signals, friction_bps) for name, signals in variants.items()}
+    cut1, cut2 = len(returns) // 3, (2 * len(returns)) // 3
+    for name, signals in variants.items():
+        results[name]["splits"] = {
+            "development": _metrics(returns[:cut1], signals[:cut1], friction_bps),
+            "validation": _metrics(returns[cut1:cut2], signals[cut1:cut2], friction_bps),
+            "never_seen_holdout": _metrics(returns[cut2:], signals[cut2:], friction_bps),
+        }
     print(json.dumps({"schema": "radar-baseline-counterfactual-v0.1", "source": str(args.csv),
-                      "seed": args.seed, "variants": {name: _metrics(returns, signals, friction_bps) for name, signals in variants.items()}}, sort_keys=True))
+                      "seed": args.seed, "split_policy": "chronological_thirds",
+                      "variants": results}, sort_keys=True))
     return 0
 
 
