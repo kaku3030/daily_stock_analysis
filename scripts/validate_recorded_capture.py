@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""Validate a recorded EOD capture for Harness consumption."""
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+from src.services.strategy_lab.market_data_capture import load_recorded_capture
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--csv", type=Path, required=True)
+    parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument("--dataset-id", required=True)
+    parser.add_argument("--dataset-version", required=True)
+    args = parser.parse_args()
+    capture = load_recorded_capture(args.csv, args.manifest)
+    capsule = capture.to_capsule(args.dataset_id, args.dataset_version)
+    print(json.dumps({"status": "VALIDATED", "dataset_id": capsule.dataset_id,
+                      "dataset_version": capsule.dataset_version,
+                      "source_id": capsule.source_id, "event_count": len(capsule.events),
+                      "fingerprint": capsule.fingerprint}, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

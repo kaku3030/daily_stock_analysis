@@ -33,6 +33,19 @@ jobs:
           python scripts/capture_research_eod.py --market us --symbol SPY \
             --start 2015-01-01 --end "$END_DATE" \
             --output artifacts/us_SPY.csv --retries 3
+      - name: Validate recorded captures
+        run: |
+          for market in cn_600000 us_SPY; do
+            csv="artifacts/${market}.csv"
+            manifest="${csv}.manifest.json"
+            if [ -f "$csv" ] && [ -f "$manifest" ]; then
+              python scripts/validate_recorded_capture.py \
+                --csv "$csv" --manifest "$manifest" \
+                --dataset-id "$market-eod" --dataset-version "${GITHUB_SHA:0:12}"
+            else
+              echo "SKIPPED: $market capture unavailable (manifest likely CAPTURE_BLOCKED)"
+            fi
+          done
       - name: Upload recorded captures and manifests
         if: always()
         uses: actions/upload-artifact@v4
