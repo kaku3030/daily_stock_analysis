@@ -113,8 +113,15 @@ def assess_future_publication_leakage(
 def assess_historical_date_recognition_leakage(
     *, prompt_text: str, sensitive_dates: Sequence[str]
 ) -> GateResult:
-    """An LLM prompt containing an evaluation-window absolute date is a
-    recognition leak: the model can recall the day's known outcome."""
+    """ADVERSARIAL/FIXTURE predicate (not a universal production rule).
+
+    Detects an LLM prompt containing an evaluation-window absolute date -- a
+    recognition leak where the model can recall the day's known outcome. This
+    is a deliberately narrow, string-matching fixture: it proves the *shape*
+    of the leak for adversarial regression, not a context-aware production
+    contamination policy. Stronger context-aware semantics (if any exist
+    elsewhere) remain the production authority.
+    """
     text = str(prompt_text)
     dates = _tokens("sensitive_dates", sensitive_dates)
     hits = _contains_any(text, dates)
@@ -134,7 +141,12 @@ def assess_historical_date_recognition_leakage(
 def assess_entity_recognition_leakage(
     *, prompt_text: str, masked_entities: Sequence[str]
 ) -> GateResult:
-    """An unmasked real entity in an LLM prompt is an entity-recognition leak."""
+    """ADVERSARIAL/FIXTURE predicate (not a universal production rule).
+
+    Detects an unmasked real entity in an LLM prompt via exact string match.
+    Narrow fixture proving the leak shape for adversarial regression only; it
+    is not a context-aware production contamination policy.
+    """
     text = str(prompt_text)
     entities = _tokens("masked_entities", masked_entities)
     hits = _contains_any(text, entities)
@@ -152,32 +164,56 @@ def assess_entity_recognition_leakage(
 
 
 def assess_report_period_as_publication(
-    *, report_period: datetime, publication_time: datetime, decision_time: datetime
+    *,
+    report_period: datetime,
+    publication_time: datetime,
+    decision_time: datetime,
+    evidence_visible: bool,
 ) -> GateResult:
-    """Using a report period (e.g. fiscal quarter end) as if it were the
-    publication instant leaks information when the period post-dates the
-    publication time or the decision instant."""
+    """Reject the misuse of report_period AS IF it were availability time.
+
+    The forbidden condition is treating a report period (e.g. fiscal quarter
+    end) as the instant the evidence becomes usable. The correct availability
+    gate is ``publication_time``, never ``report_period``:
+
+    * ``publication_time > decision_time`` AND the evidence is presented as
+      visible to the decision  => HARD FAIL (future publication leaked).
+    * ``publication_time <= decision_time`` => allowed, *independent of
+      report_period* (report_period is NOT required to equal publication_time,
+      and report_period may even post-date publication_time without being a
+      leak by itself).
+
+    ``report_period`` is carried only as evidence provenance; it is never
+    converted into a publication instant. ``evidence_visible`` is the caller's
+    claim that the evidence was made available to the decision context; an
+    unknown/malformed ``evidence_visible`` fails closed (contamination).
+    """
     period = _aware("report_period", report_period)
     publication = _aware("publication_time", publication_time)
     decision = _aware("decision_time", decision_time)
-    # A report period is always >= its publication; if they are treated as
-    # identical yet the period strictly follows publication, that conflation
-    # is itself the leak. Also reject any period that post-dates decision.
-    conflation = period != publication
-    future_period = period > decision
-    leaked = conflation or future_period
+    if not isinstance(evidence_visible, bool):
+        # Unknown availability claim is fail-closed, never treated as clean.
+        return GateResult(
+            gate="pit_report_period_as_publication",
+            passed=False,
+            reason="evidence_visibility_unknown",
+            evidence={
+                "report_period": _stamp(period),
+                "publication_time": _stamp(publication),
+                "decision_time": _stamp(decision),
+                "evidence_visible": evidence_visible,
+            },
+        )
+    leaked = evidence_visible and publication > decision
     return GateResult(
         gate="pit_report_period_as_publication",
         passed=not leaked,
-        reason=(
-            "period_conflated_with_publication"
-            if conflation
-            else ("period_after_decision" if future_period else "period_not_leaked")
-        ),
+        reason="future_publication_visible" if leaked else "publication_not_future_or_not_visible",
         evidence={
             "report_period": _stamp(period),
             "publication_time": _stamp(publication),
             "decision_time": _stamp(decision),
+            "evidence_visible": evidence_visible,
         },
     )
 
@@ -348,8 +384,12 @@ def assess_tool_output_unmasked_leakage(
 def assess_benchmark_window_memorization(
     *, prompt_text: str, benchmark_constituents: Sequence[str]
 ) -> GateResult:
-    """A prompt naming benchmark constituents of the evaluation window is a
-    memorization clue: the model recalls the window's known trajectory."""
+    """ADVERSARIAL/FIXTURE predicate (not a universal production rule).
+
+    Detects a prompt naming benchmark constituents of the evaluation window
+    via exact string match -- a memorization clue shape for adversarial
+    regression only, not a context-aware production contamination policy.
+    """
     text = str(prompt_text)
     constituents = _tokens("benchmark_constituents", benchmark_constituents)
     hits = _contains_any(text, constituents)

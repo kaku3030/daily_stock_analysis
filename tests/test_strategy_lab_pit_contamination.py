@@ -125,25 +125,54 @@ def test_D_masked_prompt_is_clean() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_E_period_conflated_with_publication_is_flagged() -> None:
-    # report_period == quarter end, but publication happens later; treating
-    # them as identical is the leak.
+def test_E_future_publication_visible_is_flagged() -> None:
+    # publication_time after decision_time, presented as visible => HARD FAIL,
+    # regardless of report_period.
+    result = assess_report_period_as_publication(
+        report_period=_dt(2026, 3, 31),
+        publication_time=_dt(2026, 4, 15),
+        decision_time=_dt(2026, 4, 10),
+        evidence_visible=True,
+    )
+    assert result.passed is False
+    assert result.reason == "future_publication_visible"
+
+
+def test_E_report_period_not_equal_publication_is_not_required() -> None:
+    # report_period != publication_time is NORMAL, not a leak: the forbidden
+    # thing is using report_period AS publication. publication <= decision =>
+    # allowed independent of report_period (even if report_period post-dates
+    # publication, or differs).
+    result = assess_report_period_as_publication(
+        report_period=_dt(2026, 3, 31),      # quarter end
+        publication_time=_dt(2026, 4, 15),   # published later
+        decision_time=_dt(2026, 4, 20),      # decision after publication
+        evidence_visible=True,
+    )
+    assert result.passed is True
+
+
+def test_E_future_publication_but_not_visible_is_not_leaked() -> None:
+    # publication > decision but evidence_visible=False => the caller does NOT
+    # claim it was available, so no leak is asserted.
+    result = assess_report_period_as_publication(
+        report_period=_dt(2026, 3, 31),
+        publication_time=_dt(2026, 4, 15),
+        decision_time=_dt(2026, 4, 10),
+        evidence_visible=False,
+    )
+    assert result.passed is True
+
+
+def test_E_unknown_visibility_fails_closed() -> None:
     result = assess_report_period_as_publication(
         report_period=_dt(2026, 3, 31),
         publication_time=_dt(2026, 4, 15),
         decision_time=_dt(2026, 4, 20),
+        evidence_visible=None,  # unknown availability claim
     )
     assert result.passed is False
-    assert result.reason == "period_conflated_with_publication"
-
-
-def test_E_period_not_after_decision_and_equal_publication_is_clean() -> None:
-    result = assess_report_period_as_publication(
-        report_period=_dt(2026, 3, 31),
-        publication_time=_dt(2026, 3, 31),
-        decision_time=_dt(2026, 4, 20),
-    )
-    assert result.passed is True
+    assert result.reason == "evidence_visibility_unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -372,7 +401,10 @@ def test_every_predicate_emits_gate_result_shape() -> None:
         assess_historical_date_recognition_leakage(prompt_text="2026-03-10", sensitive_dates=["2026-03-10"]),
         assess_entity_recognition_leakage(prompt_text="600519", masked_entities=["600519"]),
         assess_report_period_as_publication(
-            report_period=_dt(2026, 3, 31), publication_time=_dt(2026, 4, 15), decision_time=_dt(2026, 4, 20)
+            report_period=_dt(2026, 3, 31),
+            publication_time=_dt(2026, 4, 15),
+            decision_time=_dt(2026, 4, 10),
+            evidence_visible=True,
         ),
         assess_nearest_abs_future_selection(target_date=D, candidate_dates=[AFTER]),
         assess_symmetric_window_future_leakage(center=D, radius=timedelta(days=1), decision_time=D),
