@@ -17,12 +17,13 @@ def _returns(csv_path: Path) -> list[float]:
 
 def _metrics(returns: list[float], signals: list[bool], friction_bps: float) -> dict[str, float]:
     selected = [value for value, signal in zip(returns, signals) if signal]
-    equity = 1.0
-    for value in selected:
-        equity *= 1.0 + value - (2.0 * friction_bps / 10000.0)
+    gross = _gross_return(selected)
+    trade_count = sum(signal != previous for previous, signal in zip([False] + signals[:-1], signals))
+    # Charge friction on position transitions (entry/exit), not every held bar.
+    equity = (1.0 + gross) * (1.0 - friction_bps / 10000.0) ** trade_count
     return {"observations": float(len(returns)), "coverage": len(selected) / len(returns) if returns else 0.0,
-            "cumulative_return_net": equity - 1.0,
-            "cumulative_return_gross": _gross_return(selected),
+            "cumulative_return_net": equity - 1.0, "cumulative_return_gross": gross,
+            "trade_count": float(trade_count),
             "friction_bps_per_side": friction_bps,
             "hit_rate": sum(value > 0 for value in selected) / len(selected) if selected else 0.0}
 
