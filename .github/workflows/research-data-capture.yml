@@ -46,6 +46,13 @@ jobs:
               echo "SKIPPED: $market capture unavailable (manifest likely CAPTURE_BLOCKED)"
             fi
           done
+      - name: Run baseline counterfactuals
+        run: |
+          for csv in artifacts/cn_600000.csv artifacts/us_SPY.csv; do
+            if [ -f "$csv" ]; then
+              python scripts/run_baseline_counterfactual.py --csv "$csv"
+            fi
+          done
       - name: Upload recorded captures and manifests
         if: always()
         uses: actions/upload-artifact@v4
