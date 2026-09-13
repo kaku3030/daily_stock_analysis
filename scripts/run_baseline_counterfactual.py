@@ -35,16 +35,28 @@ def _gross_return(selected: list[float]) -> float:
     return equity - 1.0
 
 
+def _fixed_hold(entries: list[bool], bars: int) -> list[bool]:
+    signals, remaining = [], 0
+    for entry in entries:
+        if remaining == 0 and entry:
+            remaining = bars
+        signals.append(remaining > 0)
+        remaining = max(0, remaining - 1)
+    return signals
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--csv", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=20260913)
     parser.add_argument("--cost-bps", type=float, default=10.0)
     parser.add_argument("--slippage-bps", type=float, default=5.0)
+    parser.add_argument("--hold-bars", type=int, default=5)
     args = parser.parse_args()
     returns = _returns(args.csv)
     # PIT-safe signal: yesterday's return may only select today's return.
-    base = [False] + [returns[i - 1] > 0 for i in range(1, len(returns))]
+    entries = [False] + [returns[i - 1] > 0 for i in range(1, len(returns))]
+    base = _fixed_hold(entries, max(1, args.hold_bars))
     placebo = base[:]
     random.Random(args.seed).shuffle(placebo)
     variants = {"without_rule": [False] * len(returns), "with_rule": base,
