@@ -30,7 +30,8 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=20260913)
     args = parser.parse_args()
     returns = _returns(args.csv)
-    base = [value > 0 for value in returns]
+    # PIT-safe signal: yesterday's return may only select today's return.
+    base = [False] + [returns[i - 1] > 0 for i in range(1, len(returns))]
     placebo = base[:]
     random.Random(args.seed).shuffle(placebo)
     variants = {"without_rule": [False] * len(returns), "with_rule": base,
