@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+# Make the repository's src package importable when invoked from any cwd.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.services.strategy_lab.market_data_capture import load_recorded_capture
 
