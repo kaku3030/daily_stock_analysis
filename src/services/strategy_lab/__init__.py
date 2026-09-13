@@ -110,7 +110,7 @@ from .experiment_registry import (
     compute_registration_operation_fingerprint,
 )
 from .research_dataset import LateEventPolicy, ResearchDataEvent, ResearchDatasetCapsule
-from .market_data_capture import MarketDataCapture
+from .market_data_capture import MarketDataCapture, load_recorded_capture
 from .holdout_orchestration import HoldoutClaimOrchestrationResult, ReservedHoldoutClaimOrchestrator
 from .counterfactual_runner import CounterfactualMeasurement, CounterfactualRunReport, run_counterfactual_plan
 from .temporal_contract import (
@@ -304,7 +304,7 @@ __all__ = [
     "PITInputEvidence",
     "ResearchDataEvent",
     "ResearchDatasetCapsule",
-    "MarketDataCapture",
+    "MarketDataCapture", "load_recorded_capture",
     "ReservedHoldoutClaimOrchestrator",
     "ParameterStabilityConfig",
     "ParameterStabilityLabel",
