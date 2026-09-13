@@ -24,6 +24,7 @@ def _metrics(returns: list[float], signals: list[bool], friction_bps: float) -> 
     return {"observations": float(len(returns)), "coverage": len(selected) / len(returns) if returns else 0.0,
             "cumulative_return_net": equity - 1.0, "cumulative_return_gross": gross,
             "trade_count": float(trade_count),
+            "max_drawdown": _max_drawdown(selected),
             "friction_bps_per_side": friction_bps,
             "hit_rate": sum(value > 0 for value in selected) / len(selected) if selected else 0.0}
 
@@ -33,6 +34,15 @@ def _gross_return(selected: list[float]) -> float:
     for value in selected:
         equity *= 1.0 + value
     return equity - 1.0
+
+
+def _max_drawdown(values: list[float]) -> float:
+    equity, peak, drawdown = 1.0, 1.0, 0.0
+    for value in values:
+        equity *= 1.0 + value
+        peak = max(peak, equity)
+        drawdown = min(drawdown, equity / peak - 1.0)
+    return drawdown
 
 
 def _fixed_hold(entries: list[bool], bars: int) -> list[bool]:
@@ -71,8 +81,10 @@ def main() -> int:
             "validation": _metrics(returns[cut1:cut2], signals[cut1:cut2], friction_bps),
             "never_seen_holdout": _metrics(returns[cut2:], signals[cut2:], friction_bps),
         }
+    benchmark = _metrics(returns, [True] * len(returns), 0.0)
     print(json.dumps({"schema": "radar-baseline-counterfactual-v0.1", "source": str(args.csv),
                       "seed": args.seed, "split_policy": "chronological_thirds",
+                      "buy_and_hold_benchmark": benchmark,
                       "variants": results}, sort_keys=True))
     return 0
 
